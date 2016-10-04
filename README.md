@@ -5,7 +5,7 @@ Python script utilised for identifying open reading frames in a study of Calliac
 This script was designed to work with Python versions 3.4 and 3.5, and utilises the in-built ‘re’ and ‘os’ packages, as well as the external ‘Biopython’ package (https://github.com/biopython/biopython.github.io/). This script was built and tested on the Windows 10 OS, though there should be no reason why it cannot run on any OS that Python is capable of running on.
 
 # Description of script logic
-The custom Python script used in this study is the creation of Zachary K Stewart. This script was designed to be used by those unfamiliar with command line operations. Thus, the starting section of the script has text prompts which specify to the user what commands are required at each point, with checks in place to ensure the user inputs the correct values. The order of this is to...
+This script was designed to be used by those unfamiliar with command line operations. Thus, the starting section of the script has text prompts which specify to the user what commands are required at each point, with checks in place to ensure the user inputs the correct values. The order of this is to...
 
 1. Specify the name of the fasta file which contains the nucleotide sequences from which ORFs will be extracted.
 2. Specify the output file name containing the extracted ORFs.
