@@ -58,6 +58,7 @@ while True:
                         raise Exception
                 if os.path.isfile(outputFileName + '.fasta'):
                         print('This is already a file. Try again.')
+                        continue
                 break
         except:
                 print('You used an illegal character (i.e. \\/:?"<>|). Try to name your file without these characters again.')
