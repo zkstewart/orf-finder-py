@@ -56,6 +56,8 @@ while True:
                 for character in illegalCharacters:
                      if character in outputFileName:
                         raise Exception
+                if os.path.isfile(outputFileName + '.fasta'):
+                        print('This is already a file. Try again.')
                 break
         except:
                 print('You used an illegal character (i.e. \\/:?"<>|). Try to name your file without these characters again.')
@@ -258,12 +260,12 @@ for record in records:
             outputText = ''
 
 # Dump the last few results after the script has finished, or create the output if there were less than 10,000 sequences
-if os.path.isfile(os.getcwd() + '\\' + outputFileName + '.txt') == False:
+if os.path.isfile(os.getcwd() + '\\' + outputFileName + '.fasta') == False:
         output = open(outputFileName + '.fasta', 'w')
         output.write(outputText)
         output.close()
         print('Final save made after ' + str(ongoingCount) + ' sequences scanned for ORFs.')
-elif os.path.isfile(os.getcwd() + '\\' + outputFileName + '.txt') == True:
+elif os.path.isfile(os.getcwd() + '\\' + outputFileName + '.fasta') == True:
         output = open(outputFileName + '.fasta', 'a')
         output.write(outputText)
         output.close()
