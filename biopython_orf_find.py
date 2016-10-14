@@ -45,7 +45,7 @@ while True:
 print('')
 
 # Allow user to determine output file name
-print('Enter the name which you want the output .txt file to be called. Do not write the file extension, and make sure not to use illegal characters (i.e. \\/:?"<>|).')
+print('Enter the name which you want the output .fasta file to be called. Do not write the file extension, and make sure not to use illegal characters (i.e. \\/:?"<>|).')
 while True:
         try:
                 illegalCharacters = '\/:?"<>|'
