@@ -133,24 +133,32 @@ else:
 ### CORE PROCESSING LOOP
 print('Starting the core processing of this script now. Regular backups will be saved and notifications will be presented in this text area.')
 
-# Get the nucleotide (record) out of our list of nucleotides (records) and grab the ORFs!      # Note that I didn't write the code up to the len(splitProtein[i]) < minProLen line which means it hasn't been commented in any significant degree. This was taken from the biopython user guide.
+# Get the nucleotide (record) out of our list of nucleotides (records) and grab the ORFs!
 for record in records:
         for strand, nuc in [(+1, record.seq), (-1, record.seq.reverse_complement())]:
                 for frame in range(3):
-                        length = 3 * ((len(record)-frame) // 3)                                                 # Multiple of three (Not my note, whoever made this section thought it necessary to write this)
+                        length = 3 * ((len(record)-frame) // 3)
+                        ongoingLength = 0                                                                       # The ongoingLength will track where we are along the splitProtein sequence to determine the protPosition
                         splitProtein = nuc[frame:frame+length].translate(table=1).split("*")                    # An asterisk represents a stop codon, thus by splitting by asterisk we obtain a list of all the ORFs in this frame
                         for i in range(len(splitProtein)):                                                      # Note that I have done a 'for i in range...' loop rather than a 'for value in splitProtein' loop which would have been simpler for a reason explained below on the 'elif i + 1 ==' line
+                                # Determine ongoingLength before we continue with the actual processing
+                                if len(splitProtein) == 1:                            
+                                        ongoingLength += len(splitProtein[i])
+                                elif i + 1 == len(splitProtein):
+                                        ongoingLength += len(splitProtein[i])
+                                else:
+                                        ongoingLength += len(splitProtein[i]) + 1
+                                # Process sequences to determine whether we're ignoring this, or adding an asterisk for length counts
                                 if len(splitProtein[i]) < minProLen:                    # Disregard sequences that won't meet the size requirement without further processing
                                         continue
-                                elif len(splitProtein) == 1:                            # If the length of splitProtein is 1, that means there was no stop codon in this frame          to make it possible to identify the last entry in splitProtein when adding asterisks (stop codons) into sequences
+                                elif len(splitProtein) == 1:                            # If the length of splitProtein is 1, that means there was no stop codon in this frame
                                         acceptedPro = str(splitProtein[i])
                                 elif i + 1 == len(splitProtein):                        # [i + 1 will equal the length of splitProtein on the final loop] Since we know there are at least 2 values in the splitProtein list, we know that the last entry will not have a stop codon. This line is the reason I used the 'for i in range' strategy rather than 'for value in splitProtein', since, depending on how short the minProLen has been specified as, it was possible doing a 'if value == splitProtein[-1]' would not accurately determine whether the ORF region we're looking at is actually the final region or is simply identical to the final region
                                         acceptedPro = str(splitProtein[i])
                                 else:                                                   # Since we know there are at least 2 values in the splitProtein list, and we know that this is not the last entry, we know that this entry has a stop codon after it
                                         acceptedPro = str(splitProtein[i]) + '*'
                                 # Alternative start coding      
-                                protPosition = re.findall(r'(.*)' + str(splitProtein[i]) + r'(.*)', str(nuc[frame:frame+length].translate(table=1)))       # Find where the ORF region is positioned in relation to the whole nucleotide sequence
-                                preProtLength = len(protPosition[0][0])*3               # Get the length of the region leading up to the protein in nucleotides (hence times 3)
+                                preProtLength = (ongoingLength - len(acceptedPro))*3        # Get the length of the region leading up to the protein in nucleotides (hence times 3). We also minus the length of the current splitProtein since we have added this to the ongoingLength value already
                                 nucSeqOfProt = nuc[frame:frame+length][preProtLength:]  # Pull out the nucleotide sequence that corresponds to the ORF region
                                 codons = re.findall('..?.?', str(nucSeqOfProt))         # Pulls out a list of codons from the nucleotide
                                 for codon in codons:                                    # Cycle through this list of codons to find the first alternative start of the normal class (GTG and TTG) and the rare class (CTG)
