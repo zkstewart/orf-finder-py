@@ -1,5 +1,5 @@
 # orf-finder-py
-Python script utilised for identifying open reading frames in a study of Calliactis polypus regeneration
+Python script utilised for identifying open reading frames in a study of Calliactis polypus regeneration (Transcriptomic investigation of wound healing and regeneration in the cnidarian Calliactis polypus, Scientific Reports, doi: 10.1038/srep41458) (http://www.nature.com/articles/srep41458)
 
 # Dependencies
 This script was designed to work with Python versions 3.4 and 3.5, and utilises the in-built ‘re’ and ‘os’ packages, as well as the external ‘Biopython’ package (https://github.com/biopython/biopython.github.io/). This script was built and tested on the Windows 10 OS, though there should be no reason why it cannot run on any OS that Python is capable of running on.
