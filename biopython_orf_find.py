@@ -1,15 +1,14 @@
 #! python3
-# Biopython based ORF Finder
+# Biopython based ORF Finder (protein version)
 # This script will obtain open reading frames from a fasta-formatted file containing nucleotide transcripts.
 # Constraints can be altered to vary the strictness with which we accept or reject alternative start codons. 
 # The output is a .fasta file containing any number of translated protein ORFs that the user has specified based upon a minimum length also specified. 
-# Note that I am not formally trained in coding with any languages and am self-taught. You should not expect this code to be written in a 'professional' manner, though you should expect it to work.
 
 # Load packages
-import re, os
+import re, os, argparse
 from Bio import SeqIO
 
-# Declaration of values that are required before loop start. These are reset at the end of each loop as well. Note that I know writing this script from the ground up to rely on globals is 'bad practice', this script is simply intended to be a standalone file which will read a file in and return the wanted results.
+# Declaration of values that are required before loop start. These are reset at the end of each loop as well.
 mPro = ''
 altPro = ''
 nonePro = ''
@@ -28,107 +27,189 @@ startCodon = re.compile(r'^.*?(M.*)')           # Regex to pull out just the seq
 
 ongoingCount = 0
 
-### PRE-CORE LOOP SET-UP
+### USER INPUT
+usage = """%(prog)s reads in a fasta formatted file containing nucleotide sequences and, following user-specified parameters,
+produces an output fasta file containing potential open reading frames (ORFs) protein translations.
+"""
+# Reqs
+p = argparse.ArgumentParser(description=usage)
+#p.add_argument("input", type = str, help="Input fasta file name")
+#p.add_argument("output", type = str, help="Output fasta file name")
+p.add_argument("--input", "-input", dest="fileName",
+                   help="Input fasta file name")
+p.add_argument("--output", "-output", dest="outputFileName",
+                   help="Output fasta file name")
+# Opts
+p.add_argument("--min", "-min", type=int, dest="minProLen",
+                   help="Minimum ORF amino acid length", default=30)
+p.add_argument("--max", "-max", type=int, dest="maxProLen",
+                   help="Optional specification for maximum ORF amino acid length. By default this is 0, which means there is no upper limit.", default=0)
+p.add_argument("--numhits", "-numhits", type=int, dest="hitsToPull",
+                   help="Specify the number of ORFs you wish to extract from each sequence", default=3)
+p.add_argument("--altcodon", "-altcodon", type=int, dest="altCodonStringency",
+                   help="Control the stringency with which alternative start codon ORFs are accepted. Recommended not to change unless you understand the influence this has.", default=49)
+p.add_argument("--nocodon", "-nocodon", type=int, dest="noCodonStringency",
+                   help="Control the stringency with which fragmentary ORFs are accepted (fragmentary means there is no traditional or common alternative start codon in the sequence). Recommended not to change unless you understand the influence this has.", default=99)
+p.add_argument("--replace", "-replace", type=str, dest="replace", choices = ['y', 'n', 'Y', 'N'],
+                   help="Optional ability to replace alternative starting position with a methionine (M)", default='n')
+p.add_argument("--force", "-force", dest="force", choices = ['y', 'n', 'Y', 'N'],
+                   help="By default this is 'n' which means the program will not overwrite existing files. Specify 'y' to allow this behaviour at your own risk.", default='n')
 
-# Locate our file of interest
-print('Enter the name of the fasta-formatted file you wish to extract ORFs from. This should be a nucleotide sequence file with .fa or .fasta extension. Do not write the file extension here.')
-while True:
-        try:
-                fileName = input()
-                if os.path.isfile(fileName + '.fasta') == False and os.path.isfile(fileName + '.fa') == False:
-                        raise Exception
-                print('Fasta file located successfully')
-                break
-        except:
-                print('Fasta file failed to load. If you misspelt the name, try again. If this script isn\'t in the same directory as the fasta file, move it there then try again.')
-                continue
-print('')
+args = p.parse_args()
 
-# Allow user to determine output file name
-print('Enter the name which you want the output .fasta file to be called. Do not write the file extension, and make sure not to use illegal characters (i.e. \\/:?"<>|).')
-while True:
-        try:
-                illegalCharacters = '\/:?"<>|'
-                outputFileName = input()
-                if outputFileName == '':
-                        print('You didn\'t name this file anything. You need to have at least one character in your output file name. Try again.')
+fileName = args.fileName
+outputFileName = args.outputFileName
+minProLen = args.minProLen
+maxProLen = args.maxProLen
+hitsToPull = args.hitsToPull
+altCodonStringency = args.altCodonStringency
+noCodonStringency = args.noCodonStringency
+replace = args.replace
+force = args.force
+
+# Check if we should be overwriting files
+if outputFileName != None:
+        if os.path.isfile(outputFileName) and force.lower() != 'y':
+                print('There is already a file named ' + outputFileName + '. Either specify a new file name, delete this older file, or provide the -force argument either "Y" or "y"')
+                quit()
+        elif os.path.isfile(outputFileName) and force.lower() == 'y':
+                os.remove(outputFileName)
+
+if fileName == None or outputFileName == None:
+        # Locate our file of interest
+        print('Enter the name of the fasta-formatted file you wish to extract ORFs from. This should be a nucleotide sequence file. Include file extension (e.g., ".fasta").')
+        while True:
+                try:
+                        fileName = input()
+                        if os.path.isfile(fileName) == False:
+                                raise Exception
+                        print('Fasta file located successfully')
+                        break
+                except KeyboardInterrupt:
+                        quit()
+                except:
+                        print('Fasta file failed to load. If you misspelt the name, try again. If this script isn\'t in the same directory as the fasta file, move it there then try again.')
                         continue
-                for character in illegalCharacters:
-                     if character in outputFileName:
-                        raise Exception
-                if os.path.isfile(outputFileName + '.fasta'):
-                        print('This is already a file. Try again.')
+        print('')
+
+        # Allow user to determine output file name
+        print('Enter the name which you want the output fasta file to be called. Do not write the file extension, and make sure not to use illegal characters (i.e. \\/:?"<>|).')
+        while True:
+                try:
+                        illegalCharacters = '\/:?"<>|'
+                        outputFileName = input()
+                        if outputFileName == '':
+                                print('You didn\'t name this file anything. You need to have at least one character in your output file name. Try again.')
+                                continue
+                        for character in illegalCharacters:
+                             if character in outputFileName:
+                                raise Exception
+                        if os.path.isfile(outputFileName):
+                                print('This is already a file. Try again.')
+                                continue
+                        break
+                except KeyboardInterrupt:
+                        quit()
+                except:
+                        print('You used an illegal character (i.e. \\/:?"<>|). Try to name your file without these characters again.')
                         continue
-                break
-        except:
-                print('You used an illegal character (i.e. \\/:?"<>|). Try to name your file without these characters again.')
-                continue
-print('')
+        print('')
 
-# Allow user to determine minimum protein length
-print('Enter the minimum amino acid length that you want to accept as a legitimate ORF. A setting of 100AA (equivalent to 300bp nucleotide) is recommended if searching for \'normal\' proteins, but you can reduce this number if you want to find smaller proteins.')
-while True:
-        minProLen = input()
-        try:
-                minProLen = int(minProLen)
-                break
-        except:
-                print('You seem to have not typed a number here. Try again.')
-print('')
+        # Allow user to determine minimum protein length
+        print('Enter the minimum amino acid length that you want to accept as a legitimate ORF. A setting of 100AA (equivalent to 300bp nucleotide) is recommended if searching for \'normal\' proteins, but you can reduce this number if you want to find smaller proteins.')
+        while True:
+                minProLen = input()
+                try:
+                        minProLen = int(minProLen)
+                        break
+                except KeyboardInterrupt:
+                        quit()
+                except:
+                        print('You seem to have not typed a number here. Try again.')
+        print('')
 
-# Allow user to determine number of ORFs to pull
-print('Enter the number of ORFs you wish to extract from each sequence. Recommended number is from 1-3, but I won\'t force you to do that. If you want to pull all ORFs, just put in a large number (not too large though as it may reduce script speed).')
-while True:
-        hitsToPull = input()
-        try:
-                hitsToPull = int(hitsToPull)
-                break
-        except:
-                print('You seem to have not typed a number here. Try again.')
-print('')
+        # Allow user to determine maximum protein length
+        print('Enter the maximum amino acid length that you want to accept as a legitimate ORF. A setting of 0AA will result in no upper limit.')
+        while True:
+                maxProLen = input()
+                try:
+                        maxProLen = int(maxProLen)
+                        break
+                except KeyboardInterrupt:
+                        quit()
+                except:
+                        print('You seem to have not typed a number here. Try again.')
+        print('')
 
-# Allow user to customise script for different performance
-print('Do you want to run with the default settings of this program?')
-print('If you wish to run default (the recommended settings), type \'yes\', otherwise type \'no\' to customise these settings.')
-print('')
-print('Default means that we won\'t utilise a alternative start codon (i.e., TTG or GTG commonly, or a CTG rarely) unless it improves ORF length by 49 AA when compared to ORFs that start with a methionine (ATG), or an ORF which lacks a start codon entirely unless it improves ORF length by 99AA when compared to those that do have start codons.')
-print('')
-while True:
-        yesOrNo = input()
-        if yesOrNo.lower() == 'yes':
-                altCodonStringency = 49
-                noCodonStringency = 99
-                print('Good choice! Default is the best way to obtain results that are similar to or better than established ORF finders such as NCBI\'s ORF Finder.')
-                print('')
-                break
-        if yesOrNo.lower() == 'no':
-                print('Have it your way! What do you want the length requirement to be before we accept a common alternative start codon (i.e. TTG or GTG).')
-                print('Note that, because of the way this script works, you should minus one from the number you want to use (i.e. 100 becomes 99).') # Numbers should be - 1 since, if we compare a protein to a no hit (aka '-' value) in the "Run a final size comparison to choose the best ORF" section below, using a minProLen of 100 instead of 99 will result in a protein with a length of 100A not being properly accepted in fringe cases where the length of the protein is exactly 100AA (our default minimum length). Reasoning: if 100 > len('-') + minProLen(99)... if minProLen were to be 100, then our protein of length 100 would not be > 101
-                while True:
-                        altCodonStringency = input()
-                        try:
-                                altCodonStringency = int(altCodonStringency)
-                                break
-                        except:
-                                print('You seem to have not typed a number here. Try again.')
-                
-                print('What do you want the length requirement to be before we accept potentially incompletely sequenced ORFs with no start codon (i.e. at the 5\' and 3\' ends of the nucleotide sequence).')
-                while True:
-                        noCodonStringency = input()
-                        try:
-                                noCodonStringency = int(noCodonStringency)
-                                break
-                        except:
-                                print('You seem to have not typed a number here. Try again.')
-                break
-        else:
-                print('You didn\'t seem to type \'yes\' or \'no\', try again.')
+        # Allow user to determine number of ORFs to pull
+        print('Enter the number of ORFs you wish to extract from each sequence. Recommended number is from 1-3, but I won\'t force you to do that. If you want to pull all ORFs, just put in a large number (not too large though as it may reduce script speed).')
+        while True:
+                hitsToPull = input()
+                try:
+                        hitsToPull = int(hitsToPull)
+                        break
+                except KeyboardInterrupt:
+                        quit()
+                except:
+                        print('You seem to have not typed a number here. Try again.')
+        print('')
+
+        # Allow user to customise script for different performance
+        print('Do you want to run with the default settings of this program?')
+        print('If you wish to run default (the recommended settings), type \'yes\', otherwise type \'no\' to customise these settings.')
+        print('')
+        print('Default means that we won\'t utilise a alternative start codon (i.e., TTG or GTG commonly, or a CTG rarely) unless it improves ORF length by 49 AA when compared to ORFs that start with a methionine (ATG), or an ORF which lacks a start codon entirely unless it improves ORF length by 99AA when compared to those that do have start codons.')
+        print('')
+        while True:
+                yesOrNo = input()
+                if yesOrNo.lower() == 'yes':
+                        altCodonStringency = 49
+                        noCodonStringency = 99
+                        print('Good choice! Default is the best way to obtain results that are similar to or better than established ORF finders such as NCBI\'s ORF Finder.')
+                        print('')
+                        break
+                if yesOrNo.lower() == 'no':
+                        print('Have it your way! What do you want the length requirement to be before we accept a common alternative start codon (i.e. TTG or GTG).')
+                        print('Note that, because of the way this script works, you should minus one from the number you want to use (i.e. 100 becomes 99).') # Numbers should be - 1 since, if we compare a protein to a no hit (aka '-' value) in the "Run a final size comparison to choose the best ORF" section below, using a minProLen of 100 instead of 99 will result in a protein with a length of 100A not being properly accepted in fringe cases where the length of the protein is exactly 100AA (our default minimum length). Reasoning: if 100 > len('-') + minProLen(99)... if minProLen were to be 100, then our protein of length 100 would not be > 101
+                        while True:
+                                altCodonStringency = input()
+                                try:
+                                        altCodonStringency = int(altCodonStringency)
+                                        break
+                                except KeyboardInterrupt:
+                                        quit()
+                                except:
+                                        print('You seem to have not typed a number here. Try again.')
+                        
+                        print('What do you want the length requirement to be before we accept potentially incompletely sequenced ORFs with no start codon (i.e. at the 5\' and 3\' ends of the nucleotide sequence).')
+                        while True:
+                                noCodonStringency = input()
+                                try:
+                                        noCodonStringency = int(noCodonStringency)
+                                        break
+                                except KeyboardInterrupt:
+                                        quit()
+                                except:
+                                        print('You seem to have not typed a number here. Try again.')
+                        break
+                else:
+                        print('You didn\'t seem to type \'yes\' or \'no\', try again.')
+
+        # Allow user to determine whether alternative starts should be coded as M
+        print('Do you want to replace alternative start positions with a methionine (M)? Enter \'y\' or \'n\'')
+        while True:
+                replace = input()
+                if replace.lower() == 'y' or replace.lower() == 'n':
+                        break
+                else:
+                        print('You didn\'t type \'y\' or \'n\'. Try again.')
+        print('')
 
 # Load the fasta file as a generator object
-if os.path.isfile(fileName + '.fasta') == True:
-        records = SeqIO.parse(open(fileName + '.fasta', 'rU'), 'fasta')
+if os.path.isfile(fileName) == True:
+        records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
 else:
-        records = SeqIO.parse(open(fileName + '.fa', 'rU'), 'fasta')
+        records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
 
 ### CORE PROCESSING LOOP
 print('Starting the core processing of this script now. Regular backups will be saved and notifications will be presented in this text area.')
@@ -149,7 +230,9 @@ for record in records:
                                 else:
                                         ongoingLength += len(splitProtein[i]) + 1
                                 # Process sequences to determine whether we're ignoring this, or adding an asterisk for length counts
-                                if len(splitProtein[i]) < minProLen:                    # Disregard sequences that won't meet the size requirement without further processing
+                                if len(splitProtein[i]) < minProLen:                            # Disregard sequences that won't meet the size requirement without further processing
+                                        continue
+                                elif maxProLen != 0 and len(splitProtein[i]) > maxProLen:       # Disregard sequences that won't meet the size requirement without further processing
                                         continue
                                 elif len(splitProtein) == 1:                            # If the length of splitProtein is 1, that means there was no stop codon in this frame
                                         acceptedPro = str(splitProtein[i])
@@ -159,7 +242,8 @@ for record in records:
                                         acceptedPro = str(splitProtein[i]) + '*'
                                 # Alternative start coding      
                                 preProtLength = (ongoingLength - len(acceptedPro))*3        # Get the length of the region leading up to the protein in nucleotides (hence times 3). We also minus the length of the current splitProtein since we have added this to the ongoingLength value already
-                                nucSeqOfProt = nuc[frame:frame+length][preProtLength:]  # Pull out the nucleotide sequence that corresponds to the ORF region
+                                protLenAsNucl = len(acceptedPro)*3
+                                nucSeqOfProt = nuc[frame:frame+length][preProtLength:preProtLength+protLenAsNucl]  # Pull out the nucleotide sequence that corresponds to the ORF region
                                 codons = re.findall('..?.?', str(nucSeqOfProt))         # Pulls out a list of codons from the nucleotide
                                 for codon in codons:                                    # Cycle through this list of codons to find the first alternative start of the normal class (GTG and TTG) and the rare class (CTG)
                                         if codon == 'GTG' or codon == 'TTG':
@@ -175,10 +259,12 @@ for record in records:
 
                                 if codonIndex != None:                                  # Gets the start position of the protein if we found a likely alternative start (aka a 'GTG' or 'TTG')
                                         altPro = acceptedPro[codonIndex:]
-                                        altPro = 'M' + altPro[1:]                       # This script assumes that the alternative start will be substituted with a methionine post-transcription
+                                        if replace.lower() == 'y':
+                                                altPro = 'M' + altPro[1:]               # This script assumes that the alternative start will be substituted with a methionine post-transcription
                                 elif noneCodonContingency != None:                      # This will match an alternative start to 'CTG' only if 'TTG' or 'GTG' are not present
                                         altPro = acceptedPro[codonIndex:]
-                                        altPro = 'M' + altPro[1:]
+                                        if replace.lower() == 'y':
+                                                altPro = 'M' + altPro[1:]
 
                                 if splitProtein[i] == splitProtein[0]:                  # nonePro makes an assumption that the start of the ORF was not assembled properly resulting in the real start codon being cut off. Our stringency values will assess the likelihood of this hypothesis.
                                         nonePro = acceptedPro                           # Additionally, by only obtaining a 'nonePro' when it is in a protein fragment at the start of a frame (i.e., splitProtein[0]), we also make the (reasonable) assumption that any ORF inbetween two stop codons should itself have a start codon. This doesn't always hold true due to transcript assembly errors, but it must be assumed for the purpose of this script.                          
@@ -194,13 +280,15 @@ for record in records:
                                 # Cull the top hit if it doesn't meet our minimum length requirement anymore, or add it to the temporary list of ORF hits from this nucleotide sequence
                                 if len(topHit) < minProLen:                                             # Culling is necessary since we will have shortened the sequence somewhat unless we accepted the topHit as being a no codon start ORF. Note that we will here consider a stop codon in the length of the protein, such that a protein with 99AAs and a stop will pass a minimum 100AA length test. I think this is fair since not all regions here have a stop codon which allows weight to be added to these cases, especially since a stop codon is still conserved as part of an ORF.
                                         doNothing = ''
+                                elif maxProLen!= 0 and len(topHit) > maxProLen:                         # Culling should not be necessary here in almost all scenarios, but who knows?
+                                        doNothing = ''
                                 elif topHit == mPro:
                                         tempMList.append(topHit)                                        # These temp lists will be populated with potential ORFs from a single nucleotide sequence before being processed in the next major chunk of code starting with 'if len(tempMList + tempAltList + tempNoneList) >= 1:'
                                 elif topHit == altPro:
                                         tempAltList.append(topHit)
                                 elif topHit == nonePro:
                                         tempNoneList.append(topHit)
-
+                                        
                                 # Reset values required for assessing the next protein fragment
                                 topHit = ''
                                 mPro = ''
@@ -255,27 +343,27 @@ for record in records:
         ongoingCount += 1       # Keep a count so we can save backups
 
         # Save backup if ongoingCount == 10,000. There are two sections here, the first will create the file on the first loop, the second will add to the file on subsequent loops
-        if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName + '.fasta') == False:
-            output = open(outputFileName + '.fasta', 'w')
+        if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
+            output = open(outputFileName, 'w')
             output.write(outputText)
             output.close()
             print('Backup made after ' + str(ongoingCount) + ' sequences scanned for ORFs.')
             outputText = ''
-        elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName + '.fasta') == True:
-            output = open(outputFileName + '.fasta', 'a')
+        elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
+            output = open(outputFileName, 'a')
             output.write(outputText)
             output.close()
             print('Backup made after ' + str(ongoingCount) + ' sequences scanned for ORFs.')
             outputText = ''
 
 # Dump the last few results after the script has finished, or create the output if there were less than 10,000 sequences
-if os.path.isfile(os.getcwd() + '\\' + outputFileName + '.fasta') == False:
-        output = open(outputFileName + '.fasta', 'w')
+if os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
+        output = open(outputFileName, 'w')
         output.write(outputText)
         output.close()
         print('Final save made after ' + str(ongoingCount) + ' sequences scanned for ORFs.')
-elif os.path.isfile(os.getcwd() + '\\' + outputFileName + '.fasta') == True:
-        output = open(outputFileName + '.fasta', 'a')
+elif os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
+        output = open(outputFileName, 'a')
         output.write(outputText)
         output.close()
         print('Final save made after ' + str(ongoingCount) + ' sequences scanned for ORFs!')
