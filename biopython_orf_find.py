@@ -1,59 +1,42 @@
 #! python3
-# Biopython based ORF Finder (protein version)
+# Biopython based ORF Finder
 # This script will obtain open reading frames from a fasta-formatted file containing nucleotide transcripts.
 # Constraints can be altered to vary the strictness with which we accept or reject alternative start codons. 
-# The output is a .fasta file containing any number of translated protein ORFs that the user has specified based upon a minimum length also specified. 
+# The output is a .fasta file containing any number of ORFs that the user has specified based upon a minimum and maximum length also specified. 
 
 # Load packages
 import re, os, argparse
 from Bio import SeqIO
 
-# Declaration of values that are required before loop start. These are reset at the end of each loop as well.
-mPro = ''
-altPro = ''
-nonePro = ''
-topHit = ''
-
-outputText = ''
-tempOutputText = ''
-
-tempOverallList = []
-tempMList = []
-tempAltList = []
-tempNoneList = []
-codonIndex = None
-noneCodonContingency = None
-startCodon = re.compile(r'^.*?(M.*)')           # Regex to pull out just the sequence starting with a Methionine (or ATG)
-
-ongoingCount = 0
-
 ### USER INPUT
 usage = """%(prog)s reads in a fasta formatted file containing nucleotide sequences and, following user-specified parameters,
-produces an output fasta file containing potential open reading frames (ORFs) protein translations.
+produces an output fasta file containing potential open reading frames (ORFs) as nucleotides/protein translations/both.
 """
 # Reqs
 p = argparse.ArgumentParser(description=usage)
 #p.add_argument("input", type = str, help="Input fasta file name")
 #p.add_argument("output", type = str, help="Output fasta file name")
-p.add_argument("--input", "-input", dest="fileName",
+p.add_argument("-i", "-input", dest="fileName",
                    help="Input fasta file name")
-p.add_argument("--output", "-output", dest="outputFileName",
+p.add_argument("-o", "-output", dest="outputFileName",
                    help="Output fasta file name")
 # Opts
-p.add_argument("--min", "-min", type=int, dest="minProLen",
-                   help="Minimum ORF amino acid length", default=30)
-p.add_argument("--max", "-max", type=int, dest="maxProLen",
-                   help="Optional specification for maximum ORF amino acid length. By default this is 0, which means there is no upper limit.", default=0)
-p.add_argument("--numhits", "-numhits", type=int, dest="hitsToPull",
-                   help="Specify the number of ORFs you wish to extract from each sequence", default=3)
-p.add_argument("--altcodon", "-altcodon", type=int, dest="altCodonStringency",
-                   help="Control the stringency with which alternative start codon ORFs are accepted. Recommended not to change unless you understand the influence this has.", default=49)
-p.add_argument("--nocodon", "-nocodon", type=int, dest="noCodonStringency",
-                   help="Control the stringency with which fragmentary ORFs are accepted (fragmentary means there is no traditional or common alternative start codon in the sequence). Recommended not to change unless you understand the influence this has.", default=99)
-p.add_argument("--replace", "-replace", type=str, dest="replace", choices = ['y', 'n', 'Y', 'N'],
-                   help="Optional ability to replace alternative starting position with a methionine (M)", default='n')
-p.add_argument("--force", "-force", dest="force", choices = ['y', 'n', 'Y', 'N'],
-                   help="By default this is 'n' which means the program will not overwrite existing files. Specify 'y' to allow this behaviour at your own risk.", default='n')
+p.add_argument("-min", "-minimum", type=int, dest="minProLen",
+                   help="Minimum ORF amino acid length. Default == 30.", default=30)
+p.add_argument("-max", "-maximum", type=int, dest="maxProLen",
+                   help="Optional specification for maximum ORF amino acid length. Default == 0, which means there is no upper limit.", default=0)
+p.add_argument("-num", "-numhits", type=int, dest="hitsToPull",
+                   help="Specify the number of ORFs you wish to extract from each sequence. Default == 3.", default=3)
+p.add_argument("-alt", "-altcodon", type=int, dest="altCodonStringency",
+                   help="Control the stringency with which alternative start codon ORFs are accepted. Recommended not to change unless you understand the influence this has. Default == 49.", default=49)
+p.add_argument("-no", "-nocodon", type=int, dest="noCodonStringency",
+                   help="Control the stringency with which fragmentary ORFs are accepted (fragmentary means there is no traditional or common alternative start codon in the sequence). Recommended not to change unless you understand the influence this has. Default == 99.", default=99)
+p.add_argument("-st", "-seqtype", dest="sequenceType", choices = ['prot', 'nucl', 'both', 'PROT', 'NUCL', 'BOTH'],
+                   help="Specify the type of output you want to generate (i.e., protein translated ORF, nucleotide CDS, or both). If you specify 'both', two outputs with '_prot' and '_nucl' suffix will be generated. Default == prot.", default="prot")
+p.add_argument("-r", "-replace", dest="replace", choices = ['y', 'n', 'Y', 'N'],
+                   help="Optional ability to replace alternative starting position with a methionine (M) [only relevant if obtaining proteins]. Default == 'n'.", default='n')
+p.add_argument("-f", "-force", dest="force", choices = ['y', 'n', 'Y', 'N'],
+                   help="Default == 'n', which means the program will not overwrite existing files. Specify 'y' to allow this behaviour at your own risk.", default='n')
 
 args = p.parse_args()
 
@@ -64,6 +47,7 @@ maxProLen = args.maxProLen
 hitsToPull = args.hitsToPull
 altCodonStringency = args.altCodonStringency
 noCodonStringency = args.noCodonStringency
+sequenceType = args.sequenceType
 replace = args.replace
 force = args.force
 
@@ -93,7 +77,7 @@ if fileName == None or outputFileName == None:
         print('')
 
         # Allow user to determine output file name
-        print('Enter the name which you want the output fasta file to be called. Do not write the file extension, and make sure not to use illegal characters (i.e. \\/:?"<>|).')
+        print('Enter the name which you want the output fasta file to be called. Include the file extension, and make sure not to use illegal characters (i.e. \\/:?"<>|).')
         while True:
                 try:
                         illegalCharacters = '\/:?"<>|'
@@ -195,39 +179,84 @@ if fileName == None or outputFileName == None:
                 else:
                         print('You didn\'t seem to type \'yes\' or \'no\', try again.')
 
+        # Allow user to determine what kind of output they want to have
+        print('Do you want to produce a translated protein ORF file, a nucleotide CDS file, or both? Enter \'prot\', \'nucl\', or \'both\'')
+        seqtypeChoices = ['prot', 'nucl', 'both', 'PROT', 'NUCL', 'BOTH']
+        while True:
+                try:
+                        sequenceType = input()
+                        if sequenceType.lower() not in seqtypeChoices:
+                                raise Exception
+                        break
+                except KeyboardInterrupt:
+                        quit()
+                except:
+                        print('You didn\'t type \'prot\', \'nucl\', or \'both\'. Try again.')
+        print('')
+
         # Allow user to determine whether alternative starts should be coded as M
         print('Do you want to replace alternative start positions with a methionine (M)? Enter \'y\' or \'n\'')
+        metChoices = ['y', 'n', 'Y', 'N']
         while True:
-                replace = input()
-                if replace.lower() == 'y' or replace.lower() == 'n':
+                try:
+                        replace = input()
+                        if replace.lower() not in metChoices:
+                                raise Exception
                         break
-                else:
+                except KeyboardInterrupt:
+                        quit()
+                except:
                         print('You didn\'t type \'y\' or \'n\'. Try again.')
         print('')
 
 # Load the fasta file as a generator object
-if os.path.isfile(fileName) == True:
-        records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
-else:
-        records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
+records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
+
+# Sort output file names if outputting both prot and nucl
+if sequenceType.lower() == 'both':
+        outPrefix = outputFileName.rsplit('.', maxsplit=1)
+        protOutName = outPrefix[0] + '_prot.' + outPrefix[1]
+        nuclOutName = outPrefix[0] + '_nucl.' + outPrefix[1]
 
 ### CORE PROCESSING LOOP
-print('Starting the core processing of this script now. Regular backups will be saved and notifications will be presented in this text area.')
+print('Starting the core processing of this script now. Notifications will be presented in this text area.')
+
+# Declare overall values needed before loop start
+startCodon = re.compile(r'^.*?(M.*)')           # Regex to pull out just the sequence starting with a Methionine (or ATG)
+ongoingCount = 0
+outputProt = []                                 # These get reset whenever we output to file
+outputNucl = []
 
 # Get the nucleotide (record) out of our list of nucleotides (records) and grab the ORFs!
 for record in records:
+        # Declare output holding values that should reset for each transcript/record
+        tempOverallProt = []
+        tempOverallNucl = []
+        tempMProt = []
+        tempMNucl = []
+        tempAltProt = []
+        tempAltNucl = []
+        tempNoneProt = []
+        tempNoneNucl = []
         for strand, nuc in [(+1, record.seq), (-1, record.seq.reverse_complement())]:
                 for frame in range(3):
                         length = 3 * ((len(record)-frame) // 3)
                         ongoingLength = 0                                                                       # The ongoingLength will track where we are along the splitProtein sequence to determine the protPosition
                         splitProtein = nuc[frame:frame+length].translate(table=1).split("*")                    # An asterisk represents a stop codon, thus by splitting by asterisk we obtain a list of all the ORFs in this frame
                         for i in range(len(splitProtein)):                                                      # Note that I have done a 'for i in range...' loop rather than a 'for value in splitProtein' loop which would have been simpler for a reason explained below on the 'elif i + 1 ==' line
-                                # Determine ongoingLength before we continue with the actual processing
-                                if len(splitProtein) == 1:                            
+                                # Declare blank values needed for each potential ORF region so we can tell which things were 'found'
+                                mPro = ''
+                                altPro = ''
+                                nonePro = ''
+                                topHit = ''
+                                codonIndex = None
+                                noneCodonContingency = None
+                                # Determine ongoingLength before we continue with the actual processing 
+                                if len(splitProtein) == 1:                                      # This means the splitProtein has no stop codons
                                         ongoingLength += len(splitProtein[i])
-                                elif i + 1 == len(splitProtein):
+                                elif i + 1 == len(splitProtein):                                # This means we're looking at the last ORF in the splitProtein, which means it will have no stop codon
                                         ongoingLength += len(splitProtein[i])
-                                else:
+                                else:                                                           # Add +1 here since the protein does have a stop codon after it. I could ignore this step, but I think a stop codon should be considered in the protein length since it's a conserved feature. Mainly, this weights an ORF with a stop codon above one without assuming the amino-acid length is identical.
                                         ongoingLength += len(splitProtein[i]) + 1
                                 # Process sequences to determine whether we're ignoring this, or adding an asterisk for length counts
                                 if len(splitProtein[i]) < minProLen:                            # Disregard sequences that won't meet the size requirement without further processing
@@ -282,91 +311,184 @@ for record in records:
                                         doNothing = ''
                                 elif maxProLen!= 0 and len(topHit) > maxProLen:                         # Culling should not be necessary here in almost all scenarios, but who knows?
                                         doNothing = ''
-                                elif topHit == mPro:
-                                        tempMList.append(topHit)                                        # These temp lists will be populated with potential ORFs from a single nucleotide sequence before being processed in the next major chunk of code starting with 'if len(tempMList + tempAltList + tempNoneList) >= 1:'
+                                elif topHit == mPro:                                                    # These temp lists will be populated with potential ORFs from a single nucleotide sequence before being processed in the next major chunk of code starting with 'if len(tempMList + tempAltList + tempNoneList) >= 1:'
+                                        if sequenceType.lower() == 'prot':
+                                                tempMProt.append(topHit)
+                                        elif sequenceType.lower() == 'nucl':
+                                                newStartPosition = acceptedPro.find(mPro)
+                                                tempMNucl.append(str(nucSeqOfProt[newStartPosition*3:]))
+                                        else:
+                                                tempMProt.append(topHit)
+                                                newStartPosition = acceptedPro.find(mPro)
+                                                tempMNucl.append(str(nucSeqOfProt[newStartPosition*3:]))
                                 elif topHit == altPro:
-                                        tempAltList.append(topHit)
+                                        if sequenceType.lower() == 'prot':
+                                                tempAltProt.append(topHit)
+                                        elif sequenceType.lower() == 'nucl':
+                                                newStartPosition = acceptedPro.find(altPro[1:]) - 1     # - 1 since we're looking at the second character in our altPro (just in case we're replacing with M)
+                                                tempAltNucl.append(str(nucSeqOfProt[newStartPosition*3:]))
+                                        else:
+                                                tempAltProt.append(topHit)
+                                                newStartPosition = acceptedPro.find(altPro[1:]) - 1
+                                                tempAltNucl.append(str(nucSeqOfProt[newStartPosition*3:]))
                                 elif topHit == nonePro:
-                                        tempNoneList.append(topHit)
-                                        
-                                # Reset values required for assessing the next protein fragment
-                                topHit = ''
-                                mPro = ''
-                                altPro = ''
-                                nonePro = ''
-                                codonIndex = None
-                                noneCodonContingency = None
+                                        if sequenceType.lower() == 'prot':
+                                                tempNoneProt.append(topHit)
+                                        elif sequenceType.lower() == 'nucl':
+                                                tempNoneNucl.append(str(nucSeqOfProt))
+                                        else:
+                                                tempNoneProt.append(topHit)
+                                                tempNoneNucl.append(str(nucSeqOfProt))
 
         # Sort our top hits from each inter-stop codon fragment by size and category (i.e. mPro or altPro?) and select the top X hits
-        if len(tempMList + tempAltList + tempNoneList) >= 1:
+        if len(tempMProt + tempAltProt + tempNoneProt) >= 1 or len(tempMNucl + tempAltNucl + tempNoneNucl) >= 1:
                 # Append '-' entries to lists which have less entries than we want to pull to allow the below 'for' loops to run without exceptions
-                for i in range(0, hitsToPull-len(tempMList)):                           # hitsToPull was declared earlier in the user entry part of this script
-                        tempMList.append('-')
-                for i in range(0, hitsToPull-len(tempAltList)):
-                        tempAltList.append('-')
-                for i in range(0, hitsToPull-len(tempNoneList)):
-                        tempNoneList.append('-')
-                # Sort the lists by size (largest on the bottom to allow the .pop() method to remove a hit when accepted)
-                tempSortedMList = sorted(tempMList, key=len)
-                tempSortedAltList = sorted(tempAltList, key=len)
-                tempSortedNoneList = sorted(tempNoneList, key=len)
-                # Run a final size comparison to choose the best ORF(s)
-                for i in range(0, hitsToPull):
-                        if len(tempSortedNoneList[-1]) > len(tempSortedAltList[-1]) + noCodonStringency and len(tempSortedNoneList[-1]) > len(tempSortedMList[-1]) + noCodonStringency:         # Again, we add the stringency values to help with determining priority of ORF ordering. Since this script will often be returning either 1, 3, or 5 potential ORFs, it is important that we order these in the most logical way
-                                tempOverallList.append(tempSortedNoneList[-1])
-                                tempSortedNoneList.pop()
-                        elif len(tempSortedAltList[-1]) > len(tempSortedMList[-1]) + altCodonStringency:
-                                tempOverallList.append(tempSortedAltList[-1])
-                                tempSortedAltList.pop()
-                        else:
-                                tempOverallList.append(tempSortedMList[-1])                                                                                                                     # By using this as the 'else' position, sequences with methionine starts will be selected in the majority of situations as the default stringency settings ensure that it is rare an alternative start is used instead of a methionine start
-                                tempSortedMList.pop()
+                        # Prot list     [If we are only looking at nucleotides, then prot lists will be populated with hyphens which, realistically, won't impact memory consumption
+                for i in range(0, hitsToPull-len(tempMProt)):
+                        tempMProt.append('-')
+                for i in range(0, hitsToPull-len(tempAltProt)):
+                        tempAltProt.append('-')
+                for i in range(0, hitsToPull-len(tempNoneProt)):
+                        tempNoneProt.append('-')
+                        # Nucl list
+                for i in range(0, hitsToPull-len(tempMNucl)):
+                        tempMNucl.append('-')
+                for i in range(0, hitsToPull-len(tempAltNucl)):
+                        tempAltNucl.append('-')
+                for i in range(0, hitsToPull-len(tempNoneNucl)):
+                        tempNoneNucl.append('-')
+                # Sort the lists by size (largest on the bottom to allow the .pop() method to remove a hit when accepted) [as above, the prot or nucl variants might just be lists of hyphens. Running the sort twice shouldn't realistically impact time in that case.
+                        # Prot
+                tempSortedMProt = sorted(tempMProt, key=len)
+                tempSortedAltProt = sorted(tempAltProt, key=len)
+                tempSortedNoneProt = sorted(tempNoneProt, key=len)
+                        # Nucl
+                tempSortedMNucl = sorted(tempMNucl, key=len)
+                tempSortedAltNucl = sorted(tempAltNucl, key=len)
+                tempSortedNoneNucl = sorted(tempNoneNucl, key=len)
+                # Run a final size comparison to choose the best ORF(s). We need to split this into two separate statements since the stringency values need to be *3 for nucls
+                if sequenceType.lower() == 'prot' or sequenceType.lower() == 'both':
+                        for i in range(0, hitsToPull):
+                                if len(tempSortedNoneProt[-1]) > len(tempSortedAltProt[-1]) + noCodonStringency and len(tempSortedNoneProt[-1]) > len(tempSortedMProt[-1]) + noCodonStringency:         # Again, we add the stringency values to help with determining priority of ORF ordering. Since this script will often be returning either 1, 3, or 5 potential ORFs, it is important that we order these in the most logical way
+                                        tempOverallProt.append(tempSortedNoneProt[-1])
+                                        tempSortedNoneProt.pop()
+                                elif len(tempSortedAltProt[-1]) > len(tempSortedMProt[-1]) + altCodonStringency:
+                                        tempOverallProt.append(tempSortedAltProt[-1])
+                                        tempSortedAltProt.pop()
+                                else:
+                                        tempOverallProt.append(tempSortedMProt[-1])                                                                                                                     # By using this as the 'else' position, sequences with methionine starts will be selected in the majority of situations as the default stringency settings ensure that it is rare an alternative start is used instead of a methionine start
+                                        tempSortedMProt.pop()
+                if sequenceType.lower() == 'nucl' or sequenceType.lower() == 'both':
+                        for i in range(0, hitsToPull):
+                                if len(tempSortedNoneNucl[-1]) > len(tempSortedAltNucl[-1]) + noCodonStringency*3 and len(tempSortedNoneNucl[-1]) > len(tempSortedMNucl[-1]) + noCodonStringency*3:         # Again, we add the stringency values to help with determining priority of ORF ordering. Since this script will often be returning either 1, 3, or 5 potential ORFs, it is important that we order these in the most logical way
+                                        tempOverallNucl.append(tempSortedNoneNucl[-1])
+                                        tempSortedNoneNucl.pop()
+                                elif len(tempSortedAltNucl[-1]) > len(tempSortedMNucl[-1]) + altCodonStringency*3:
+                                        tempOverallNucl.append(tempSortedAltNucl[-1])
+                                        tempSortedAltNucl.pop()
+                                else:
+                                        tempOverallNucl.append(tempSortedMNucl[-1])                                                                                                                     # By using this as the 'else' position, sequences with methionine starts will be selected in the majority of situations as the default stringency settings ensure that it is rare an alternative start is used instead of a methionine start
+                                        tempSortedMNucl.pop()
                 # Format and produce the output of this script
-                for i in range(0, hitsToPull):                          
-                        if tempOverallList[i] == '-':                   # Because we made sure all the tempM/Alt/NoneLists had '-' added to pad out the list to have a length equal to the value of hitsToPull, when we cycle through our tempOverallList, we will often encounter '-' characters which signify the end of relevant ORFs identified in this sequence  
-                                break                                   # Break out of this loop once we've fasta formatted all relevant ORF hits
-                        tempOutputText += '>' + record.id + '_ORF' + str(i+1) + '\n' + tempOverallList[i] + '\n'
-                outputText += tempOutputText
-                
+                tempOutputProt = []
+                tempOutputNucl = []
+                if sequenceType.lower() == 'prot' or sequenceType.lower() == 'both':
+                        for i in range(0, hitsToPull):                          
+                                if tempOverallProt[i] == '-':                   # Because we made sure all the tempM/Alt/NoneLists had '-' added to pad out the list to have a length equal to the value of hitsToPull, when we cycle through our tempOverallList, we will often encounter '-' characters which signify the end of relevant ORFs identified in this sequence  
+                                        break                                   # Break out of this loop once we've fasta formatted all relevant ORF hits
+                                tempOutputProt.append('>' + record.id + '_ORF' + str(i+1) + '\n' + tempOverallProt[i])
+                        if len(tempOutputProt) > 0:    # Need this check for sequences that don't get any hits
+                                outputProt.append('\n'.join(tempOutputProt))
+
+                if sequenceType.lower() == 'nucl' or sequenceType.lower() == 'both':
+                        for i in range(0, hitsToPull):                          
+                                if tempOverallNucl[i] == '-':                   # Because we made sure all the tempM/Alt/NoneLists had '-' added to pad out the list to have a length equal to the value of hitsToPull, when we cycle through our tempOverallList, we will often encounter '-' characters which signify the end of relevant ORFs identified in this sequence  
+                                        break                                   # Break out of this loop once we've fasta formatted all relevant ORF hits
+                                tempOutputNucl.append('>' + record.id + '_ORF' + str(i+1) + '\n' + tempOverallNucl[i])
+                        if len(tempOutputNucl) > 0:
+                                outputNucl.append('\n'.join(tempOutputNucl))
         else:
                 doNothing = ''                # We don't need to do anything if no hits were found that pass the minimum length threshold
 
+        ongoingCount += 1
         
-
-        # Reset temporary values required for assessing nucleotides as a whole before we run through this all again
-        tempOutputText = ''
-        tempOverallList = []
-        tempMList = []
-        tempAltList = []
-        tempNoneList = []
-
-        ongoingCount += 1       # Keep a count so we can save backups
-
         # Save backup if ongoingCount == 10,000. There are two sections here, the first will create the file on the first loop, the second will add to the file on subsequent loops
-        if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
-            output = open(outputFileName, 'w')
-            output.write(outputText)
-            output.close()
-            print('Backup made after ' + str(ongoingCount) + ' sequences scanned for ORFs.')
-            outputText = ''
-        elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
-            output = open(outputFileName, 'a')
-            output.write(outputText)
-            output.close()
-            print('Backup made after ' + str(ongoingCount) + ' sequences scanned for ORFs.')
-            outputText = ''
+        if sequenceType.lower() == 'prot':
+                if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
+                        with open(outputFileName, 'w') as output:
+                                output.write('\n'.join(outputProt))
+                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
+                        outputProt = []
+                elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
+                        with open(outputFileName, 'a') as output:
+                                output.write('\n')
+                                output.write('\n'.join(outputProt))
+                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
+                        outputProt = []
+        elif sequenceType.lower() == 'nucl':
+                if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
+                        with open(outputFileName, 'w') as output:
+                                output.write('\n'.join(outputNucl))
+                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
+                        outputNucl = []
+                elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
+                        with open(outputFileName, 'a') as output:
+                                output.write('\n')
+                                output.write('\n'.join(outputNucl))
+                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
+                        outputNucl = []
+        else:
+                if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + protOutName) == False:       # Doesn't matter if we check for protOutName or nuclOutName. Theoretically, if one of the files is deleted while the program is running it could be problematic, but I mean, what can I really do about that without child-proofing the script excessively?
+                        with open(protOutName, 'w') as protFile, open(nuclOutName, 'w') as nuclFile:
+                                protFile.write('\n'.join(outputProt))
+                                nuclFile.write('\n'.join(outputNucl))
+                        outputProt = []
+                        outputNucl = []
+                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
+                elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + protOutName) == True:
+                        with open(protOutName, 'a') as protFile, open(nuclOutName, 'a') as nuclFile:
+                                protFile.write('\n')
+                                nuclFile.write('\n')
+                                protFile.write('\n'.join(outputProt))
+                                nuclFile.write('\n'.join(outputNucl))
+                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
+                        outputProt = []
+                        outputNucl = []
 
 # Dump the last few results after the script has finished, or create the output if there were less than 10,000 sequences
-if os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
-        output = open(outputFileName, 'w')
-        output.write(outputText)
-        output.close()
-        print('Final save made after ' + str(ongoingCount) + ' sequences scanned for ORFs.')
-elif os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
-        output = open(outputFileName, 'a')
-        output.write(outputText)
-        output.close()
-        print('Final save made after ' + str(ongoingCount) + ' sequences scanned for ORFs!')
+if sequenceType.lower() == 'prot':
+        if os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
+                with open(outputFileName, 'w') as output:
+                        output.write('\n'.join(outputProt))
+                print(str(ongoingCount) + ' sequences scanned for ORFs.')
+        elif os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
+                with open(outputFileName, 'a') as output:
+                        output.write('\n')
+                        output.write('\n'.join(outputProt))
+                print(str(ongoingCount) + ' sequences scanned for ORFs.')
+elif sequenceType.lower() == 'nucl':
+        if os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
+                with open(outputFileName, 'w') as output:
+                        output.write('\n'.join(outputNucl))
+                print(str(ongoingCount) + ' sequences scanned for ORFs.')
+        elif os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
+                with open(outputFileName, 'a') as output:
+                        output.write('\n')
+                        output.write('\n'.join(outputNucl))
+                print(str(ongoingCount) + ' sequences scanned for ORFs.')
+else:
+        if os.path.isfile(os.getcwd() + '\\' + protOutName) == False:       # Doesn't matter if we check for protOutName or nuclOutName. Theoretically, if one of the files is deleted while the program is running it could be problematic, but I mean, what can I really do about that without child-proofing the script excessively?
+                with open(protOutName, 'w') as protFile, open(nuclOutName, 'w') as nuclFile:
+                        protFile.write('\n'.join(outputProt))
+                        nuclFile.write('\n'.join(outputNucl))
+                print(str(ongoingCount) + ' sequences scanned for ORFs.')
+        elif os.path.isfile(os.getcwd() + '\\' + protOutName) == True:
+                with open(protOutName, 'a') as protFile, open(nuclOutName, 'a') as nuclFile:
+                        protFile.write('\n')
+                        nuclFile.write('\n')
+                        protFile.write('\n'.join(outputProt))
+                        nuclFile.write('\n'.join(outputNucl))
+                print(str(ongoingCount) + ' sequences scanned for ORFs.')
 
 records.close()
 #### SCRIPT ALL DONE
