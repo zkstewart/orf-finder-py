@@ -22,7 +22,7 @@ Before delving into the specifics of how the stringencies (step 6) work, it shou
 The default alternative codon parameter is 49. This means that the script will consider an ORF that starts with an alternative codon as "better" than one that starts with a methionine **only** if it is greater than 49 AA longer. 
 
 ###No-codon###
-The default no-codon parameter is 99. This means that the script will consider an ORF that does not start with a codon as "better" than one that starts with **any** codon (traditional or alternative) if it is greater than 99 AA longer.
+The default no-codon parameter is 99. This means that the script will consider an ORF that does not start with a codon as "better" than one that starts with **any** codon (traditional or alternative) **only** if it is greater than 99 AA longer.
 
 These two stringencies affect the internal sorting process of the script, and determine what order ORFs are presented in the output files. Internally, when looking at any individual ORF, it will decide if a traditional start codon, an alternative start codon, or no codon best fits the ORF. The implicit assumption is that a no-codon start is a fragmentary ORF, and this is why it should be weighted against most heavily. In most scenarios, a methionine codon will be present in an ORF, so the two stringency values help to decide whether the ORF should start at the first methionine, or if it should start earlier. With regards to the output, the script will rank all ORFs obtained from a sequence using the two stringencies. Thus, the first ORF for each sequence is considered most likely to be the "best." Each subsequent ORF will be a bit shorter, or it may start have an alternative or no-codon start which is weighted against.
 
