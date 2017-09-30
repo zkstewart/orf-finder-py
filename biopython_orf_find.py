@@ -32,7 +32,7 @@ p.add_argument("-alt", "-altcodon", type=int, dest="altCodonStringency",
 p.add_argument("-no", "-nocodon", type=int, dest="noCodonStringency",
                    help="Control the stringency with which fragmentary ORFs are accepted (fragmentary means there is no traditional or common alternative start codon in the sequence). Recommended not to change unless you understand the influence this has. Default == 99.", default=99)
 p.add_argument("-st", "-seqtype", dest="sequenceType", choices = ['prot', 'nucl', 'both', 'PROT', 'NUCL', 'BOTH'],
-                   help="Specify the type of output you want to generate (i.e., protein translated ORF, nucleotide CDS, or both). If you specify 'both', two outputs with '_prot' and '_nucl' suffix will be generated. Default == prot.", default="prot")
+                   help="Specify the type of output you want to generate (i.e., protein translated ORF, nucleotide CDS, or both). If you specify 'both', two outputs with '_prot' and '_nucl' suffix will be generated. Default == 'prot'.", default="prot")
 p.add_argument("-r", "-replace", dest="replace", choices = ['y', 'n', 'Y', 'N'],
                    help="Optional ability to replace alternative starting position with a methionine (M) [only relevant if obtaining proteins]. Default == 'n'.", default='n')
 p.add_argument("-f", "-force", dest="force", choices = ['y', 'n', 'Y', 'N'],
