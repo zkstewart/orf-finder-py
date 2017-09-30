@@ -209,7 +209,11 @@ if fileName == None or outputFileName == None:
                         print('You didn\'t type \'y\' or \'n\'. Try again.')
         print('')
 
-# Load the fasta file as a generator object
+# Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
+records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
+totalCount = 0
+for record in records:
+        totalCount += 1
 records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
 
 # Sort output file names if outputting both prot and nucl
@@ -219,16 +223,22 @@ if sequenceType.lower() == 'both':
         nuclOutName = outPrefix[0] + '_nucl.' + outPrefix[1]
 
 ### CORE PROCESSING LOOP
-print('Starting the core processing of this script now. Notifications will be presented in this text area.')
+print('Starting the core processing of this script now. Progress bar is displayed below. Every 10,000 sequences, current progress will be saved to the output file(s) to reduce memory footprint.')
 
 # Declare overall values needed before loop start
 startCodon = re.compile(r'^.*?(M.*)')           # Regex to pull out just the sequence starting with a Methionine (or ATG)
 ongoingCount = 0
 outputProt = []                                 # These get reset whenever we output to file
 outputNucl = []
+rememberPrint = -1
 
 # Get the nucleotide (record) out of our list of nucleotides (records) and grab the ORFs!
 for record in records:
+        # Progress bar
+        progress = ((ongoingCount+1)/totalCount)*100
+        if int(progress)%1==0 and rememberPrint != int(progress):
+                print('|' + str(int(progress)) + '% progress|' + str(ongoingCount+1) + ' sequences scanned for ORFs', end = '\r')       # Need to +1 to ongoingCount to counteract 0-index
+                rememberPrint = int(progress) 
         # Declare output holding values that should reset for each transcript/record
         tempOverallProt = []
         tempOverallNucl = []
@@ -420,25 +430,21 @@ for record in records:
                 if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
                         with open(outputFileName, 'w') as output:
                                 output.write('\n'.join(outputProt))
-                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
                         outputProt = []
                 elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
                         with open(outputFileName, 'a') as output:
                                 output.write('\n')
                                 output.write('\n'.join(outputProt))
-                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
                         outputProt = []
         elif sequenceType.lower() == 'nucl':
                 if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
                         with open(outputFileName, 'w') as output:
                                 output.write('\n'.join(outputNucl))
-                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
                         outputNucl = []
                 elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
                         with open(outputFileName, 'a') as output:
                                 output.write('\n')
                                 output.write('\n'.join(outputNucl))
-                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
                         outputNucl = []
         else:
                 if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + protOutName) == False:       # Doesn't matter if we check for protOutName or nuclOutName. Theoretically, if one of the files is deleted while the program is running it could be problematic, but I mean, what can I really do about that without child-proofing the script excessively?
@@ -447,14 +453,12 @@ for record in records:
                                 nuclFile.write('\n'.join(outputNucl))
                         outputProt = []
                         outputNucl = []
-                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
                 elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + protOutName) == True:
                         with open(protOutName, 'a') as protFile, open(nuclOutName, 'a') as nuclFile:
                                 protFile.write('\n')
                                 nuclFile.write('\n')
                                 protFile.write('\n'.join(outputProt))
                                 nuclFile.write('\n'.join(outputNucl))
-                        print(str(ongoingCount) + ' sequences scanned for ORFs.')
                         outputProt = []
                         outputNucl = []
 
@@ -463,35 +467,29 @@ if sequenceType.lower() == 'prot':
         if os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
                 with open(outputFileName, 'w') as output:
                         output.write('\n'.join(outputProt))
-                print(str(ongoingCount) + ' sequences scanned for ORFs.')
         elif os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
                 with open(outputFileName, 'a') as output:
                         output.write('\n')
                         output.write('\n'.join(outputProt))
-                print(str(ongoingCount) + ' sequences scanned for ORFs.')
 elif sequenceType.lower() == 'nucl':
         if os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
                 with open(outputFileName, 'w') as output:
                         output.write('\n'.join(outputNucl))
-                print(str(ongoingCount) + ' sequences scanned for ORFs.')
         elif os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
                 with open(outputFileName, 'a') as output:
                         output.write('\n')
                         output.write('\n'.join(outputNucl))
-                print(str(ongoingCount) + ' sequences scanned for ORFs.')
 else:
         if os.path.isfile(os.getcwd() + '\\' + protOutName) == False:       # Doesn't matter if we check for protOutName or nuclOutName. Theoretically, if one of the files is deleted while the program is running it could be problematic, but I mean, what can I really do about that without child-proofing the script excessively?
                 with open(protOutName, 'w') as protFile, open(nuclOutName, 'w') as nuclFile:
                         protFile.write('\n'.join(outputProt))
                         nuclFile.write('\n'.join(outputNucl))
-                print(str(ongoingCount) + ' sequences scanned for ORFs.')
         elif os.path.isfile(os.getcwd() + '\\' + protOutName) == True:
                 with open(protOutName, 'a') as protFile, open(nuclOutName, 'a') as nuclFile:
                         protFile.write('\n')
                         nuclFile.write('\n')
                         protFile.write('\n'.join(outputProt))
                         nuclFile.write('\n'.join(outputNucl))
-                print(str(ongoingCount) + ' sequences scanned for ORFs.')
 
 records.close()
 #### SCRIPT ALL DONE
