@@ -232,7 +232,7 @@ outputProt = []                                 # These get reset whenever we ou
 outputNucl = []
 rememberPrint = -1
 
-# Get the nucleotide (record) out of our list of nucleotides (records) and grab the ORFs!
+# Get the nucleotide (record) out of our generator (records) and grab them ORFs!
 for record in records:
         # Progress bar
         progress = ((ongoingCount+1)/totalCount)*100
