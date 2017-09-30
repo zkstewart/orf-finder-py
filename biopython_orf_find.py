@@ -254,14 +254,17 @@ for record in records:
                                 # Determine ongoingLength before we continue with the actual processing 
                                 if len(splitProtein) == 1:                                      # This means the splitProtein has no stop codons
                                         ongoingLength += len(splitProtein[i])
+                                        tmpOrfLen = len(splitProtein[i])
                                 elif i + 1 == len(splitProtein):                                # This means we're looking at the last ORF in the splitProtein, which means it will have no stop codon
                                         ongoingLength += len(splitProtein[i])
+                                        tmpOrfLen = len(splitProtein[i])
                                 else:                                                           # Add +1 here since the protein does have a stop codon after it. I could ignore this step, but I think a stop codon should be considered in the protein length since it's a conserved feature. Mainly, this weights an ORF with a stop codon above one without assuming the amino-acid length is identical.
                                         ongoingLength += len(splitProtein[i]) + 1
+                                        tmpOrfLen = len(splitProtein[i]) + 1                    # Need to save this tmp length so our length cut-off below can take codon length into account
                                 # Process sequences to determine whether we're ignoring this, or adding an asterisk for length counts
-                                if len(splitProtein[i]) < minProLen:                            # Disregard sequences that won't meet the size requirement without further processing
+                                if tmpOrfLen < minProLen:                            # Disregard sequences that won't meet the size requirement without further processing
                                         continue
-                                elif maxProLen != 0 and len(splitProtein[i]) > maxProLen:       # Disregard sequences that won't meet the size requirement without further processing
+                                elif maxProLen != 0 and tmpOrfLen > maxProLen:       # Disregard sequences that won't meet the size requirement without further processing
                                         continue
                                 elif len(splitProtein) == 1:                            # If the length of splitProtein is 1, that means there was no stop codon in this frame
                                         acceptedPro = str(splitProtein[i])
