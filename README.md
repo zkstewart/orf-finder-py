@@ -2,7 +2,7 @@
 Python script utilised for identifying open reading frames in a study of Calliactis polypus regeneration (Transcriptomic investigation of wound healing and regeneration in the cnidarian Calliactis polypus, Scientific Reports, doi: 10.1038/srep41458) (http://www.nature.com/articles/srep41458)
 
 # Dependencies
-This script was designed to work with Python 3, and utilises the ‘Biopython’ package (https://github.com/biopython/biopython.github.io/). This script has been tested on Windows and Linux/SUSE, but it should work anywhere that Python does.
+This script was designed to work with Python 3, and utilises the ‘Biopython’ package (http://biopython.org/). This script has been tested on Windows and Linux/SUSE, but it should work anywhere that Python does.
 
 # Description of script logic
 This script was designed to be usable by those unfamiliar with command-line operations as well as by experienced users familiar with Python operations. Thus, the script can accept arguments on the command-line, or it can (on a Windows environment) be double-clicked to launch an interactive console window with text prompts which specify to the user what commands are required at each point, with checks in place to ensure the user inputs the correct values. The order of this is to...
