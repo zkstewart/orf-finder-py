@@ -128,6 +128,9 @@ if fileName == None or outputFileName == None:
                 hitsToPull = input()
                 try:
                         hitsToPull = int(hitsToPull)
+                        if hitsToPull == 0:
+                                print('You need to specify a number greater than 0 - there\'s no point running this program if no output is being generated.')
+                                continue
                         break
                 except KeyboardInterrupt:
                         quit()
@@ -251,6 +254,11 @@ if outputFileName != None:
 
 if unresolvedCodon != 0:
         print('Program has noted that you are allowing the discovery of ORFs with unresolved codon regions. This is risky behaviour, since this program cannot guarantee that an unresolved region does not contain a stop codon. Subsequently, you can have chimeras form from two separate ORFs. YOU MUST VERIFY ANY ORFS WITH UNRESOLVED REGIONS! The best way to do this is with BLAST against homologous proteins. You have been warned.')
+
+# Check for silly settings
+if hitsToPull == 0:
+        print('You set numhits to 0. There\'s no point running this program if you aren\'t getting any output! Specify a number >0 and try again.')
+        quit()
 
 # Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
 records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
