@@ -37,6 +37,8 @@ p.add_argument("-r", "-replace", dest="replace", choices = ['y', 'n', 'Y', 'N'],
                    help="Optional ability to replace alternative starting position with a methionine (M) [only relevant if obtaining proteins]. Default == 'n'.", default='n')
 p.add_argument("-f", "-force", dest="force", choices = ['y', 'n', 'Y', 'N'],
                    help="Default == 'n', which means the program will not overwrite existing files. Specify 'y' to allow this behaviour at your own risk.", default='n')
+p.add_argument("-u", "-unresolved", dest="unresolvedCodon", type=int,
+                   help="Default == 0, which means the program will not discover ORFs with unresolved codons. If you want to risk chimeric ORF formation, you can change this value. You MUST validate any ORFs with unresolved portions. Recommended for this value to be less than 5.", default=0)
 
 args = p.parse_args()
 
@@ -50,14 +52,9 @@ noCodonStringency = args.noCodonStringency
 sequenceType = args.sequenceType
 replace = args.replace
 force = args.force
+unresolvedCodon = args.unresolvedCodon
 
-# Check if we should be overwriting files
-if outputFileName != None:
-        if os.path.isfile(outputFileName) and force.lower() != 'y':
-                print('There is already a file named ' + outputFileName + '. Either specify a new file name, delete this older file, or provide the -force argument either "Y" or "y"')
-                quit()
-        elif os.path.isfile(outputFileName) and force.lower() == 'y':
-                os.remove(outputFileName)
+xRegex = re.compile(r'X+')                                              # Regex used to find start and stop positions of unresolved regions that are shorter than the cut-off
 
 if fileName == None or outputFileName == None:
         # Locate our file of interest
@@ -209,18 +206,58 @@ if fileName == None or outputFileName == None:
                         print('You didn\'t type \'y\' or \'n\'. Try again.')
         print('')
 
+        # Allow user to determine whether they want to accept unresolved regions in ORFs
+        print('Do you want to discover ORFs with short unresolved regions? If yes, specify the maximum number of unresolved codons allowed. A value <= 5 is recommended. If no, enter \'0\'. Note that there is always the risk of forming chimeric ORFs when allowing unresolved regions, so you MUST verify any ORFs that contain this feature.')
+        while True:
+                unresolvedCodon = input()
+                try:
+                        unresolvedCodon = int(unresolvedCodon)
+                        break
+                except KeyboardInterrupt:
+                        quit()
+                except:
+                        print('You seem to have not typed a number here. Try again.')
+        print('')
+
+# Check if we should be overwriting files / get our output names if sequenceType.lower() == 'both'
+if outputFileName != None:
+        if sequenceType.lower() != 'both':
+                if os.path.isfile(outputFileName) and force.lower() != 'y':
+                        print('There is already a file named ' + outputFileName + '. Either specify a new file name, delete this older file, or provide the -force argument either "Y" or "y"')
+                        quit()
+                elif os.path.isfile(outputFileName) and force.lower() == 'y':
+                        os.remove(outputFileName)
+        else:
+                outPrefix = outputFileName.rsplit('.', maxsplit=1)
+                protOutName = outPrefix[0] + '_prot.' + outPrefix[1]
+                nuclOutName = outPrefix[0] + '_nucl.' + outPrefix[1]
+                if os.path.isfile(protOutName) and force.lower() != 'y':
+                        print('There is already a file named ' + protOutName + '. Either specify a new file name, delete these older file(s), or provide the -force argument either "Y" or "y"')
+                        quit()
+                elif os.path.isfile(protOutName) and force.lower() == 'y':
+                        os.remove(protOutName)
+                if os.path.isfile(nuclOutName) and force.lower() != 'y':
+                        print('There is already a file named ' + nuclOutName + '. Either specify a new file name, delete these older file(s), or provide the -force argument either "Y" or "y"')
+                        quit()
+                elif os.path.isfile(nuclOutName) and force.lower() == 'y':
+                        os.remove(nuclOutName)
+                
+### RATIONALE FOR UNRESOLVED REGIONS ###
+# I had to decide how to handle unresolved regions. I believe there are two valid approaches to this. The first is to replace any unresolved regions with stop codons and let the rest of the script process it like normal.
+# This appears to be what NCBI does for their ORF Finder. The benefits of this approach is that you can't accidentally form chimeras. However, I think there is a second approach that has merit. If you are working with a genome that has
+# short and rare occurrences of unresolved regions, you might not want to split up large ORFs on the basis of them having a very short stretch of unresolved codons. In this case, we can choose to not replace unresolved regions with stop codons
+# if the region is shorter than an arbitrary and small limit. This isn't exactly perfect since even very short unresolved regions might hide stop codons. Thus, this option should be OFF by default, but we can provide the users an
+# on/off switch so they can decide whether they want to risk discovering chimeric ORFs - providing a text prompt if the option is switched ON to verify any ORFs with unresolved regions would wash my hands of any mistake.
+
+if unresolvedCodon != 0:
+        print('Program has noted that you are allowing the discovery of ORFs with unresolved codon regions. This is risky behaviour, since this program cannot guarantee that an unresolved region does not contain a stop codon. Subsequently, you can have chimeras form from two separate ORFs. YOU MUST VERIFY ANY ORFS WITH UNRESOLVED REGIONS! The best way to do this is with BLAST against homologous proteins. You have been warned.')
+
 # Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
 records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
 totalCount = 0
 for record in records:
         totalCount += 1
 records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
-
-# Sort output file names if outputting both prot and nucl
-if sequenceType.lower() == 'both':
-        outPrefix = outputFileName.rsplit('.', maxsplit=1)
-        protOutName = outPrefix[0] + '_prot.' + outPrefix[1]
-        nuclOutName = outPrefix[0] + '_nucl.' + outPrefix[1]
 
 ### CORE PROCESSING LOOP
 print('Starting the core processing of this script now. Progress bar is displayed below. Every 10,000 sequences, current progress will be saved to the output file(s) to reduce memory footprint.')
@@ -248,11 +285,58 @@ for record in records:
         tempAltNucl = []
         tempNoneProt = []
         tempNoneNucl = []
+        # Parental loop
         for strand, nuc in [(+1, record.seq), (-1, record.seq.reverse_complement())]:
                 for frame in range(3):
                         length = 3 * ((len(record)-frame) // 3)
-                        ongoingLength = 0                                                                       # The ongoingLength will track where we are along the splitProtein sequence to determine the protPosition
-                        splitProtein = nuc[frame:frame+length].translate(table=1).split("*")                    # An asterisk represents a stop codon, thus by splitting by asterisk we obtain a list of all the ORFs in this frame
+                        frameNuc = str(nuc[frame:frame+length])
+                        frameProt = str(nuc[frame:frame+length].translate(table=1))
+                        # Split protein/nucleotide into corresponding ORFs
+                        ongoingLength = 0                                       # The ongoingLength will track where we are along the unresolvedProt sequence for getting the nucleotide sequence
+                        splitNucleotide = []
+                        splitProtein = []
+                        frameProt = frameProt.split('*')
+                        for i in range(len(frameProt)):
+                                if len(frameProt) == 1 or i + 1 == len(frameProt):    # This means the splitProtein has no stop codons or we're looking at the last ORF which also has no stop codon
+                                        splitProtein.append(frameProt[i])
+                                        splitNucleotide.append(frameNuc[ongoingLength:ongoingLength+len(frameProt[i])*3])      # This will grab the corresponding nucleotide region
+                                        ongoingLength += len(frameProt[i])*3
+                                else:
+                                        splitProtein.append(frameProt[i] + '*')
+                                        splitNucleotide.append(frameNuc[ongoingLength:ongoingLength+len(frameProt[i] + '*')*3])       
+                                        ongoingLength += (len(frameProt[i]) + 1)*3
+                        
+                        # Fix unresolved regions
+                        resolvedProt = []
+                        resolvedNuc = []
+                        indicesForDel = []                                                              # We'll hold onto the indices of any splitProtein components that have X's in them. We'll loop through this later to delete them from splitProtein/Nucleotide, then we'll add the resolved segments to splitProtein/Nucleotide
+                        for i in range(len(splitProtein)):
+                                if 'X' in splitProtein[i]:
+                                        posProt = []
+                                        for x in re.finditer(xRegex, splitProtein[i]):
+                                                if x.end() - x.start() > unresolvedCodon:
+                                                        posProt += [x.start(), x.end()]
+                                        if posProt == []:                                               # If posProt still == [], that means we didn't find any unresolved regions that exceed our cut-off
+                                                continue
+                                        indicesForDel.insert(0, i)                                      # Insert it at 0 so we don't need to sort it at the end [we need to loop through a reversed list so we can directly delete the indices without messing up the order of splitProtein/Nucleotide]
+                                        # Pull out resolved regions
+                                        resolvedProt.append(splitProtein[i][:posProt[0]])               # We loop through our posProt by first grabbing everything before our first unresolved region
+                                        resolvedNuc.append(splitNucleotide[i][:posProt[0]*3])
+                                        for x in range(1, len(posProt)-1, 2):                           # We now, by skipping the first and last entry in posProt, can compare every coordinate pair that corresponds to a resolved region
+                                                start = posProt[x]
+                                                end = posProt[x+1]
+                                                resolvedProt.append(splitProtein[i][start:end])
+                                                resolvedNuc.append(splitNucleotide[i][start*3:end*3])
+                                        resolvedProt.append(splitProtein[i][posProt[-1]:])              # We can now grab everything after our last unresolved region. If there was only one unresolved region, we never enter the above loop and just use the coordinate pair to get our start and end sequences
+                                        resolvedNuc.append(splitNucleotide[i][posProt[-1]*3:])
+                        # Delete old entries and add resolved entries
+                        for index in indicesForDel:
+                                del splitProtein[index]
+                                del splitNucleotide[index]
+                        splitProtein += resolvedProt                                                    # If we don't find any unresolved regions we wanted to delete, resolvedProt will be empty so nothing happens
+                        splitNucleotide += resolvedNuc
+
+                        # Enter the main processing loop with our resolved regions
                         for i in range(len(splitProtein)):                                                      # Note that I have done a 'for i in range...' loop rather than a 'for value in splitProtein' loop which would have been simpler for a reason explained below on the 'elif i + 1 ==' line
                                 # Declare blank values needed for each potential ORF region so we can tell which things were 'found'
                                 mPro = ''
@@ -261,32 +345,15 @@ for record in records:
                                 topHit = ''
                                 codonIndex = None
                                 noneCodonContingency = None
-                                # Determine ongoingLength before we continue with the actual processing 
-                                if len(splitProtein) == 1:                                      # This means the splitProtein has no stop codons
-                                        ongoingLength += len(splitProtein[i])
-                                        tmpOrfLen = len(splitProtein[i])
-                                elif i + 1 == len(splitProtein):                                # This means we're looking at the last ORF in the splitProtein, which means it will have no stop codon
-                                        ongoingLength += len(splitProtein[i])
-                                        tmpOrfLen = len(splitProtein[i])
-                                else:                                                           # Add +1 here since the protein does have a stop codon after it. I could ignore this step, but I think a stop codon should be considered in the protein length since it's a conserved feature. Mainly, this weights an ORF with a stop codon above one without assuming the amino-acid length is identical.
-                                        ongoingLength += len(splitProtein[i]) + 1
-                                        tmpOrfLen = len(splitProtein[i]) + 1                    # Need to save this tmp length so our length cut-off below can take codon length into account
                                 # Process sequences to determine whether we're ignoring this, or adding an asterisk for length counts
-                                if tmpOrfLen < minProLen:                            # Disregard sequences that won't meet the size requirement without further processing
+                                if len(splitProtein[i]) < minProLen:                    # Disregard sequences that won't meet the size requirement without further processing
                                         continue
-                                elif maxProLen != 0 and tmpOrfLen > maxProLen:       # Disregard sequences that won't meet the size requirement without further processing
+                                elif maxProLen != 0 and len(splitProtein[i]) > maxProLen:
                                         continue
-                                elif len(splitProtein) == 1:                            # If the length of splitProtein is 1, that means there was no stop codon in this frame
-                                        acceptedPro = str(splitProtein[i])
-                                elif i + 1 == len(splitProtein):                        # [i + 1 will equal the length of splitProtein on the final loop] Since we know there are at least 2 values in the splitProtein list, we know that the last entry will not have a stop codon. This line is the reason I used the 'for i in range' strategy rather than 'for value in splitProtein', since, depending on how short the minProLen has been specified as, it was possible doing a 'if value == splitProtein[-1]' would not accurately determine whether the ORF region we're looking at is actually the final region or is simply identical to the final region
-                                        acceptedPro = str(splitProtein[i])
-                                else:                                                   # Since we know there are at least 2 values in the splitProtein list, and we know that this is not the last entry, we know that this entry has a stop codon after it
-                                        acceptedPro = str(splitProtein[i]) + '*'
+                                acceptedPro = str(splitProtein[i])
                                 # Alternative start coding      
-                                preProtLength = (ongoingLength - len(acceptedPro))*3        # Get the length of the region leading up to the protein in nucleotides (hence times 3). We also minus the length of the current splitProtein since we have added this to the ongoingLength value already
-                                protLenAsNucl = len(acceptedPro)*3
-                                nucSeqOfProt = nuc[frame:frame+length][preProtLength:preProtLength+protLenAsNucl]  # Pull out the nucleotide sequence that corresponds to the ORF region
-                                codons = re.findall('..?.?', str(nucSeqOfProt))         # Pulls out a list of codons from the nucleotide
+                                nucSeqOfProt = splitNucleotide[i]                       # Don't need to do it, but old version of script extensively uses this value and cbf changing it
+                                codons = re.findall('..?.?', nucSeqOfProt)              # Pulls out a list of codons from the nucleotide
                                 for codon in codons:                                    # Cycle through this list of codons to find the first alternative start of the normal class (GTG and TTG) and the rare class (CTG)
                                         if codon == 'GTG' or codon == 'TTG':
                                                 codonIndex = codons.index(codon)        # This will save the position of the first GTG or TTG encountered. Note that by breaking after this,  we stop looking for CTG as it is irrelevant after this
@@ -302,13 +369,13 @@ for record in records:
                                 if codonIndex != None:                                  # Gets the start position of the protein if we found a likely alternative start (aka a 'GTG' or 'TTG')
                                         altPro = acceptedPro[codonIndex:]
                                         if replace.lower() == 'y':
-                                                altPro = 'M' + altPro[1:]               # This script assumes that the alternative start will be substituted with a methionine post-transcription
+                                                altPro = 'M' + altPro[1:]               # If the argument is provided, this script assumes that the alternative start will be substituted with a methionine post-transcription
                                 elif noneCodonContingency != None:                      # This will match an alternative start to 'CTG' only if 'TTG' or 'GTG' are not present
                                         altPro = acceptedPro[codonIndex:]
                                         if replace.lower() == 'y':
                                                 altPro = 'M' + altPro[1:]
 
-                                if splitProtein[i] == splitProtein[0]:                  # nonePro makes an assumption that the start of the ORF was not assembled properly resulting in the real start codon being cut off. Our stringency values will assess the likelihood of this hypothesis.
+                                if i == 0:                                              # nonePro makes an assumption that the start of the ORF was not assembled properly resulting in the real start codon being cut off. Our stringency values will assess the likelihood of this hypothesis.
                                         nonePro = acceptedPro                           # Additionally, by only obtaining a 'nonePro' when it is in a protein fragment at the start of a frame (i.e., splitProtein[0]), we also make the (reasonable) assumption that any ORF inbetween two stop codons should itself have a start codon. This doesn't always hold true due to transcript assembly errors, but it must be assumed for the purpose of this script.                          
 
                                 # Pull out the top hit from this protein fragment based upon how strict we want to be with accepting a traditional, alternative, or no codon start                                
