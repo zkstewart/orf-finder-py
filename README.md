@@ -43,6 +43,7 @@ usage: biopython_orf_find.py [-h] [-i FILENAME] [-o OUTPUTFILENAME]
                              [-no NOCODONSTRINGENCY]
                              [-st {prot,nucl,both,PROT,NUCL,BOTH}]
                              [-r {y,n,Y,N}] [-f {y,n,Y,N}]
+                             [-u UNRESOLVEDCODON]
 
 biopython_orf_find.py reads in a fasta formatted file containing nucleotide
 sequences and, following user-specified parameters, produces an output fasta
@@ -88,4 +89,11 @@ optional arguments:
                         Default == 'n', which means the program will not
                         overwrite existing files. Specify 'y' to allow this
                         behaviour at your own risk.
+  -u UNRESOLVEDCODON, -unresolved UNRESOLVEDCODON
+                        Default == 0, which means the program will not
+                        discover ORFs with unresolved codons. If you want to
+                        risk chimeric ORF formation, you can change this
+                        value. You MUST validate any ORFs with unresolved
+                        portions. Recommended for this value to be less than
+                        5.
 ```
