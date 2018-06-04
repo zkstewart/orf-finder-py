@@ -2,11 +2,49 @@
 # Biopython based ORF Finder
 # This script will obtain open reading frames from a fasta-formatted file containing nucleotide transcripts.
 # Constraints can be altered to vary the strictness with which we accept or reject alternative start codons. 
-# The output is a .fasta file containing any number of ORFs that the user has specified based upon a minimum and maximum length also specified. 
+# The output is a fasta file containing any number of ORFs that the user has specified based upon a minimum and maximum length also specified. 
 
 # Load packages
 import re, os, argparse
 from Bio import SeqIO
+
+# Define functions for later use [Rewriting this script would make it so much prettier/easy to manage...]
+def output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceType, status):
+        if sequenceType.lower() == 'prot':
+                if (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), outputFileName)) == False:
+                        with open(outputFileName, 'w') as output:
+                                output.write('\n'.join(outputProt))
+                        outputProt = []
+                elif (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), outputFileName)) == True:
+                        with open(outputFileName, 'a') as output:
+                                output.write('\n')
+                                output.write('\n'.join(outputProt))
+                        outputProt = []
+        elif sequenceType.lower() == 'nucl':
+                if (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), outputFileName)) == False:
+                        with open(outputFileName, 'w') as output:
+                                output.write('\n'.join(outputNucl))
+                        outputNucl = []
+                elif (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), outputFileName)) == True:
+                        with open(outputFileName, 'a') as output:
+                                output.write('\n')
+                                output.write('\n'.join(outputNucl))
+                        outputNucl = []
+        else:
+                if (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), protOutName)) == False:       # Doesn't matter if we check for protOutName or nuclOutName. Theoretically, if one of the files is deleted while the program is running it could be problematic, but I mean, what can I really do about that without child-proofing the script excessively?
+                        with open(protOutName, 'w') as protFile, open(nuclOutName, 'w') as nuclFile:
+                                protFile.write('\n'.join(outputProt))
+                                nuclFile.write('\n'.join(outputNucl))
+                        outputProt = []
+                        outputNucl = []
+                elif (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), protOutName)) == True:
+                        with open(protOutName, 'a') as protFile, open(nuclOutName, 'a') as nuclFile:
+                                protFile.write('\n')
+                                nuclFile.write('\n')
+                                protFile.write('\n'.join(outputProt))
+                                nuclFile.write('\n'.join(outputNucl))
+                        outputProt = []
+                        outputNucl = []
 
 ### USER INPUT
 usage = """%(prog)s reads in a fasta formatted file containing nucleotide sequences and, following user-specified parameters,
@@ -14,8 +52,6 @@ produces an output fasta file containing potential open reading frames (ORFs) as
 """
 # Reqs
 p = argparse.ArgumentParser(description=usage)
-#p.add_argument("input", type = str, help="Input fasta file name")
-#p.add_argument("output", type = str, help="Output fasta file name")
 p.add_argument("-i", "-input", dest="fileName",
                    help="Input fasta file name")
 p.add_argument("-o", "-output", dest="outputFileName",
@@ -39,6 +75,9 @@ p.add_argument("-f", "-force", dest="force", choices = ['y', 'n', 'Y', 'N'],
                    help="Default == 'n', which means the program will not overwrite existing files. Specify 'y' to allow this behaviour at your own risk.", default='n')
 p.add_argument("-u", "-unresolved", dest="unresolvedCodon", type=int,
                    help="Default == 0, which means the program will not discover ORFs with unresolved codons. If you want to risk chimeric ORF formation, you can change this value. You MUST validate any ORFs with unresolved portions. Recommended for this value to be less than 5.", default=0)
+p.add_argument("-n", "-no_orf_num", dest="noOrfNum", action='store_true',
+                   help="Provide this argument to prevent ORF nums being appended to sequence IDs. This can be useful when obtaining 1 ORF per transcript.", default=False)
+
 
 args = p.parse_args()
 
@@ -53,6 +92,7 @@ sequenceType = args.sequenceType
 replace = args.replace
 force = args.force
 unresolvedCodon = args.unresolvedCodon
+noOrfNum = args.noOrfNum
 
 xRegex = re.compile(r'X+')                                              # Regex used to find start and stop positions of unresolved regions that are shorter than the cut-off
 
@@ -220,6 +260,24 @@ if fileName == None or outputFileName == None:
                         quit()
                 except:
                         print('You seem to have not typed a number here. Try again.')
+        print('')
+        # Allow user to determine whether they want to have orf numbers associated with output IDs
+        print('Do you want to have ORF numbers appended to transcript IDs? Enter \'y\' or \'n\' (Default recommended == \'y\'')
+        choices = ['y', 'n', 'Y', 'N']
+        while True:
+                try:
+                        noOrfNum = input()
+                        if noOrfNum.lower() not in choices:
+                                raise Exception
+                        if noOrfNum.lower() == 'y':
+                                noOrfNum = False
+                        else:
+                                noOrfNum = True
+                        break
+                except KeyboardInterrupt:
+                        quit()
+                except:
+                        print('You didn\'t type \'y\' or \'n\'. Try again.')
         print('')
 
 # Check if we should be overwriting files / get our output names if sequenceType.lower() == 'both'
@@ -484,7 +542,10 @@ for record in records:
                         for i in range(0, hitsToPull):                          
                                 if tempOverallProt[i] == '-':                   # Because we made sure all the tempM/Alt/NoneLists had '-' added to pad out the list to have a length equal to the value of hitsToPull, when we cycle through our tempOverallList, we will often encounter '-' characters which signify the end of relevant ORFs identified in this sequence  
                                         break                                   # Break out of this loop once we've fasta formatted all relevant ORF hits
-                                tempOutputProt.append('>' + record.id + '_ORF' + str(i+1) + '\n' + tempOverallProt[i])
+                                if noOrfNum == False:
+                                        tempOutputProt.append('>' + record.id + '_ORF' + str(i+1) + '\n' + tempOverallProt[i])
+                                else:
+                                        tempOutputProt.append('>' + record.id + '\n' + tempOverallProt[i])
                         if len(tempOutputProt) > 0:    # Need this check for sequences that don't get any hits
                                 outputProt.append('\n'.join(tempOutputProt))
 
@@ -492,7 +553,10 @@ for record in records:
                         for i in range(0, hitsToPull):                          
                                 if tempOverallNucl[i] == '-':                   # Because we made sure all the tempM/Alt/NoneLists had '-' added to pad out the list to have a length equal to the value of hitsToPull, when we cycle through our tempOverallList, we will often encounter '-' characters which signify the end of relevant ORFs identified in this sequence  
                                         break                                   # Break out of this loop once we've fasta formatted all relevant ORF hits
-                                tempOutputNucl.append('>' + record.id + '_ORF' + str(i+1) + '\n' + tempOverallNucl[i])
+                                if noOrfNum == False:
+                                        tempOutputNucl.append('>' + record.id + '_ORF' + str(i+1) + '\n' + tempOverallNucl[i])
+                                else:
+                                        tempOutputNucl.append('>' + record.id + '\n' + tempOverallNucl[i])
                         if len(tempOutputNucl) > 0:
                                 outputNucl.append('\n'.join(tempOutputNucl))
         else:
@@ -501,70 +565,11 @@ for record in records:
         ongoingCount += 1
         
         # Save backup if ongoingCount == 10,000. There are two sections here, the first will create the file on the first loop, the second will add to the file on subsequent loops
-        if sequenceType.lower() == 'prot':
-                if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
-                        with open(outputFileName, 'w') as output:
-                                output.write('\n'.join(outputProt))
-                        outputProt = []
-                elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
-                        with open(outputFileName, 'a') as output:
-                                output.write('\n')
-                                output.write('\n'.join(outputProt))
-                        outputProt = []
-        elif sequenceType.lower() == 'nucl':
-                if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
-                        with open(outputFileName, 'w') as output:
-                                output.write('\n'.join(outputNucl))
-                        outputNucl = []
-                elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
-                        with open(outputFileName, 'a') as output:
-                                output.write('\n')
-                                output.write('\n'.join(outputNucl))
-                        outputNucl = []
-        else:
-                if ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + protOutName) == False:       # Doesn't matter if we check for protOutName or nuclOutName. Theoretically, if one of the files is deleted while the program is running it could be problematic, but I mean, what can I really do about that without child-proofing the script excessively?
-                        with open(protOutName, 'w') as protFile, open(nuclOutName, 'w') as nuclFile:
-                                protFile.write('\n'.join(outputProt))
-                                nuclFile.write('\n'.join(outputNucl))
-                        outputProt = []
-                        outputNucl = []
-                elif ongoingCount%10000 == 0 and os.path.isfile(os.getcwd() + '\\' + protOutName) == True:
-                        with open(protOutName, 'a') as protFile, open(nuclOutName, 'a') as nuclFile:
-                                protFile.write('\n')
-                                nuclFile.write('\n')
-                                protFile.write('\n'.join(outputProt))
-                                nuclFile.write('\n'.join(outputNucl))
-                        outputProt = []
-                        outputNucl = []
+        output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceType, 'processing')
 
 # Dump the last few results after the script has finished, or create the output if there were less than 10,000 sequences
-if sequenceType.lower() == 'prot':
-        if os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
-                with open(outputFileName, 'w') as output:
-                        output.write('\n'.join(outputProt))
-        elif os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
-                with open(outputFileName, 'a') as output:
-                        output.write('\n')
-                        output.write('\n'.join(outputProt))
-elif sequenceType.lower() == 'nucl':
-        if os.path.isfile(os.getcwd() + '\\' + outputFileName) == False:
-                with open(outputFileName, 'w') as output:
-                        output.write('\n'.join(outputNucl))
-        elif os.path.isfile(os.getcwd() + '\\' + outputFileName) == True:
-                with open(outputFileName, 'a') as output:
-                        output.write('\n')
-                        output.write('\n'.join(outputNucl))
-else:
-        if os.path.isfile(os.getcwd() + '\\' + protOutName) == False:       # Doesn't matter if we check for protOutName or nuclOutName. Theoretically, if one of the files is deleted while the program is running it could be problematic, but I mean, what can I really do about that without child-proofing the script excessively?
-                with open(protOutName, 'w') as protFile, open(nuclOutName, 'w') as nuclFile:
-                        protFile.write('\n'.join(outputProt))
-                        nuclFile.write('\n'.join(outputNucl))
-        elif os.path.isfile(os.getcwd() + '\\' + protOutName) == True:
-                with open(protOutName, 'a') as protFile, open(nuclOutName, 'a') as nuclFile:
-                        protFile.write('\n')
-                        nuclFile.write('\n')
-                        protFile.write('\n'.join(outputProt))
-                        nuclFile.write('\n'.join(outputNucl))
-
+output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceType, 'final')
 records.close()
+
 #### SCRIPT ALL DONE
+print('Program completed successfully!')
