@@ -45,6 +45,7 @@ def output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceTy
                                 nuclFile.write('\n'.join(outputNucl))
                         outputProt = []
                         outputNucl = []
+        return outputProt, outputNucl
 
 ### USER INPUT
 usage = """%(prog)s reads in a fasta formatted file containing nucleotide sequences and, following user-specified parameters,
@@ -565,10 +566,10 @@ for record in records:
         ongoingCount += 1
         
         # Save backup if ongoingCount == 10,000. There are two sections here, the first will create the file on the first loop, the second will add to the file on subsequent loops
-        output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceType, 'processing')
+        outputProt, outputNucl = output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceType, 'processing')
 
 # Dump the last few results after the script has finished, or create the output if there were less than 10,000 sequences
-output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceType, 'final')
+outputProt, outputNucl = output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceType, 'final')
 records.close()
 
 #### SCRIPT ALL DONE
