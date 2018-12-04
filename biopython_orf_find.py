@@ -78,7 +78,8 @@ p.add_argument("-u", "-unresolved", dest="unresolvedCodon", type=int,
                    help="Default == 0, which means the program will not discover ORFs with unresolved codons. If you want to risk chimeric ORF formation, you can change this value. You MUST validate any ORFs with unresolved portions. Recommended for this value to be less than 5.", default=0)
 p.add_argument("-n", "-no_orf_num", dest="noOrfNum", action='store_true',
                    help="Provide this argument to prevent ORF nums being appended to sequence IDs. This can be useful when obtaining 1 ORF per transcript.", default=False)
-
+p.add_argument("-t", "-translation", dest="translationTable", type=int, default=1,
+                   help="Optionally specify the NCBI numeric genetic code to utilise for CDS translation (if relevant); this should be an integer from 1 to 31 (default == 1 i.e., Standard Code)")
 
 args = p.parse_args()
 
@@ -93,6 +94,7 @@ sequenceType = args.sequenceType
 replace = args.replace
 force = args.force
 unresolvedCodon = args.unresolvedCodon
+translationTable = args.translationTable
 noOrfNum = args.noOrfNum
 
 xRegex = re.compile(r'X+')                                              # Regex used to find start and stop positions of unresolved regions that are shorter than the cut-off
@@ -291,6 +293,8 @@ if outputFileName != None:
                         os.remove(outputFileName)
         else:
                 outPrefix = outputFileName.rsplit('.', maxsplit=1)
+                if len(outPrefix) == 1:
+                        outPrefix.append('.fasta')
                 protOutName = outPrefix[0] + '_prot.' + outPrefix[1]
                 nuclOutName = outPrefix[0] + '_nucl.' + outPrefix[1]
                 if os.path.isfile(protOutName) and force.lower() != 'y':
@@ -317,6 +321,12 @@ if unresolvedCodon != 0:
 # Check for silly settings
 if hitsToPull == 0:
         print('You set numhits to 0. There\'s no point running this program if you aren\'t getting any output! Specify a number >0 and try again.')
+        quit()
+if translationTable < 1:
+        print('-t translationTable value must be greater than 1. Fix this and try again.')
+        quit()
+elif translationTable > 31:
+        print('-t translationTable value must be less than 31. Fix this and try again.')
         quit()
 
 # Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
@@ -357,7 +367,7 @@ for record in records:
                 for frame in range(3):
                         length = 3 * ((len(record)-frame) // 3)
                         frameNuc = str(nuc[frame:frame+length])
-                        frameProt = str(nuc[frame:frame+length].translate(table=1))
+                        frameProt = str(nuc[frame:frame+length].translate(table=translationTable))
                         # Split protein/nucleotide into corresponding ORFs
                         ongoingLength = 0                                       # The ongoingLength will track where we are along the unresolvedProt sequence for getting the nucleotide sequence
                         splitNucleotide = []
