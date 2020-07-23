@@ -6,9 +6,10 @@
 # Addition: This script will seek out ORFs with signal peptide start sites
 
 # Load packages
-import re, os, argparse, platform, subprocess, time, hashlib
+import re, os, argparse, platform, subprocess, time, hashlib, queue, random
 from Bio import SeqIO
 from pathlib import Path
+from threading import Thread
 
 # Define functions for later use [Rewriting this script would make it so much prettier/easy to manage...]
 def validate_args(args):
@@ -29,6 +30,9 @@ def validate_args(args):
                 quit()
         if args.unresolvedCodon < 0:
                 print("unresolvedCodon must be >= 1. Fix your input and try again.")
+                quit()
+        if args.cpus < 0:
+                print("cpus must be >= 1. Fix your input and try again.")
                 quit()
         if args.translationTable < 1 or args.translationTable > 31:
                 print('-t translationTable value ranging from 1 to 31 inclusive. Fix this and try again.')
@@ -136,9 +140,20 @@ def run_signalp_sequence(signalpdir, cygwindir, organism, tmpDir, seqID, protStr
                                 quit()
         # Generate temporary file for sequence
         if type(seqID) == list:
-                tmpFileName = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpInput_' + ''.join([sid[0:5] for sid in seqID])[0:25] + '_'), '.fasta', ''.join([prot[0:10] for prot in protString]))
+                while True:
+                        tmpFileName = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpInput_' + ''.join([sid[0:5] for sid in seqID])[0:25] + '_'), '.fasta', ''.join([prot[0:10] for prot in protString]) + str(time.time()))
+                        if os.path.isfile(tmpFileName):
+                                continue
+                        else:
+                                break
+
         else:
-                tmpFileName = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpInput_' + seqID + '_'), '.fasta', protString)
+                while True:
+                        tmpFileName = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpInput_' + seqID + '_'), '.fasta', protString + str(time.time()))
+                        if os.path.isfile(tmpFileName):
+                                continue
+                        else:
+                                break
         with open(tmpFileName, 'w') as fileOut:
                 if type(seqID) == list:
                         for i in range(len(seqID)):
@@ -147,9 +162,9 @@ def run_signalp_sequence(signalpdir, cygwindir, organism, tmpDir, seqID, protStr
                         fileOut.write('>' + seqID.lstrip('>') + '\n' + protString + '\n')
         # Run signalP
         if type(seqID) == list:
-                sigpResultFile = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpResults_' + ''.join([sid[0:5] for sid in seqID])[0:25] + '_'), '.txt', ''.join([prot[0:10] for prot in protString]))
+                sigpResultFile = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpResults_' + ''.join([sid[0:5] for sid in seqID])[0:25] + '_'), '.txt', ''.join([prot[0:10] for prot in protString]) + str(time.time()))
         else:
-                sigpResultFile = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpResults_' + seqID + '_'), '.txt', protString)
+                sigpResultFile = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpResults_' + seqID + '_'), '.txt', protString + str(time.time()))
         signalp_unthreaded(signalpdir, cygwindir, organism, tmpDir, tmpFileName, sigpResultFile)
         # Join and parse signalP results files
         sigPredictions = {}
@@ -172,7 +187,7 @@ def signalp_unthreaded(signalpdir, cygwindir, organism, tmpDir, fastaFile, sigpR
         scriptText = '"' + os.path.join(signalpdir, 'signalp') + '" -t ' + organism + ' -f short -n "' + sigpResultFile + '" "' + fastaFile + '"'
         # Generate a script for use with cygwin (if on Windows)
         if platform.system() == 'Windows':
-                sigpScriptFile = os.path.join(tmpDir, tmp_file_name_gen('tmp_sigpScript_' + os.path.basename(fastaFile), '.sh', scriptText))
+                sigpScriptFile = os.path.join(tmpDir, tmp_file_name_gen('tmp_sigpScript_' + os.path.basename(fastaFile), '.sh', scriptText + str(time.time())))
                 with open(sigpScriptFile, 'w') as fileOut:
                         fileOut.write(scriptText.replace('\\', '/'))
         # Run signalP depending on operating system
@@ -207,144 +222,22 @@ def signalp_unthreaded(signalpdir, cygwindir, organism, tmpDir, fastaFile, sigpR
 
 def tmp_file_name_gen(prefix, suffix, hashString):
         # Main function
-        tmpHash = hashlib.md5(bytes(str(hashString) + str(time.time()), 'utf-8') ).hexdigest()       # This should always give us something unique even if the string for hashString is the same across different runs
+        tmpHash = hashlib.md5(bytes(str(hashString) + str(time.time()) + str(random.randint(0, 100000)), 'utf-8') ).hexdigest()       # This should always give us something unique even if the string for hashString is the same across different runs
         while True:
                 if os.path.isfile(prefix + tmpHash + suffix):
                         tmpHash += 'X'
                 else:
                         return prefix + tmpHash + suffix
 
-def output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceType, status, protOutName=None, nuclOutName=None):
-        if sequenceType.lower() == 'prot':
-                if (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), outputFileName)) == False:
-                        with open(outputFileName, 'w') as output:
-                                output.write('\n'.join(outputProt))
-                        outputProt = []
-                elif (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), outputFileName)) == True:
-                        with open(outputFileName, 'a') as output:
-                                output.write('\n')
-                                output.write('\n'.join(outputProt))
-                        outputProt = []
-        elif sequenceType.lower() == 'nucl':
-                if (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), outputFileName)) == False:
-                        with open(outputFileName, 'w') as output:
-                                output.write('\n'.join(outputNucl))
-                        outputNucl = []
-                elif (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), outputFileName)) == True:
-                        with open(outputFileName, 'a') as output:
-                                output.write('\n')
-                                output.write('\n'.join(outputNucl))
-                        outputNucl = []
-        else:
-                if (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), protOutName)) == False:       # Doesn't matter if we check for protOutName or nuclOutName. Theoretically, if one of the files is deleted while the program is running it could be problematic, but I mean, what can I really do about that without child-proofing the script excessively?
-                        with open(protOutName, 'w') as protFile, open(nuclOutName, 'w') as nuclFile:
-                                protFile.write('\n'.join(outputProt))
-                                nuclFile.write('\n'.join(outputNucl))
-                        outputProt = []
-                        outputNucl = []
-                elif (ongoingCount%10000 == 0 or status == 'final') and os.path.isfile(os.path.join(os.getcwd(), protOutName)) == True:
-                        with open(protOutName, 'a') as protFile, open(nuclOutName, 'a') as nuclFile:
-                                protFile.write('\n')
-                                nuclFile.write('\n')
-                                protFile.write('\n'.join(outputProt))
-                                nuclFile.write('\n'.join(outputNucl))
-                        outputProt = []
-                        outputNucl = []
-        return outputProt, outputNucl
-
-### USER INPUT
-usage = """%(prog)s reads in a fasta formatted file containing nucleotide sequences and, following user-specified parameters,
-produces an output fasta file containing potential open reading frames (ORFs) as nucleotides/protein translations/both.
-"""
-# Reqs
-p = argparse.ArgumentParser(description=usage)
-p.add_argument("-i", "-input", dest="fileName",
-                   help="Input fasta file name")
-p.add_argument("-o", "-output", dest="outputFileName",
-                   help="Output fasta file name")
-# Opts
-p.add_argument("-min", "--minimum", type=int, dest="minProLen",
-                   help="Minimum ORF amino acid length. Default == 30.", default=30)
-p.add_argument("-max", "--maximum", type=int, dest="maxProLen",
-                   help="Optional specification for maximum ORF amino acid length. Default == 0, which means there is no upper limit.", default=0)
-p.add_argument("-st", "--seqtype", dest="sequenceType", choices = ['prot', 'nucl', 'both', 'PROT', 'NUCL', 'BOTH'],
-                   help="Specify the type of output you want to generate (i.e., protein translated ORF, nucleotide CDS, or both). If you specify 'both', two outputs with '_prot' and '_nucl' suffix will be generated. Default == 'prot'.", default="prot")
-p.add_argument("-f", "--force", dest="force", action="store_true", default=False,
-                   help="Allow files to be overwritten at your own risk.")
-p.add_argument("-u", "--unresolved", dest="unresolvedCodon", type=int,
-                   help="Default == 0, which means the program will not discover ORFs with unresolved codons. If you want to risk chimeric ORF formation, you can change this value. You MUST validate any ORFs with unresolved portions. Recommended for this value to be less than 5.", default=0)
-p.add_argument("-n", "--no_orf_num", dest="noOrfNum", action='store_true',
-                   help="Provide this argument to prevent ORF nums being appended to sequence IDs. This can be useful when obtaining 1 ORF per transcript.", default=False)
-p.add_argument("-t", "--translation", dest="translationTable", type=int, default=1,
-                   help="Optionally specify the NCBI numeric genetic code to utilise for CDS translation (if relevant); this should be an integer from 1 to 31 (default == 1 i.e., Standard Code)")
-# SignalP opts
-p.add_argument("-sigpdir", "-signalpdir", dest="signalpdir", type=str,
-               help="""Specify the directory where signalp executables are located.""")
-p.add_argument("-sigporg", dest="signalporg", type = str, choices = ['euk', 'gram-', 'gram+'], default='euk',
-               help="""Specify the type of organism for SignalP from the available
-               options. Refer to the SignalP manual if unsure what these mean (default == 'euk').""")
-p.add_argument("-c", "-cygwindir", dest="cygwindir", type=str, default="",
-               help="""Cygwin is required since you are running this program on a Windows computer.
-               Specify the location of the bin directory here or, if this is already in your PATH, you can leave this blank."""
-               if platform.system() == 'Windows' else argparse.SUPPRESS)
-
-## HARD-CODED TESTING
-#args = p.parse_args()
-#args = validate_args(args)
-fileName = r"F:\toxins_annot\analysis\sigp_orf_testing\Telmatactis.fa"
-translationTable = 1
-unresolvedCodon = 0
-minProLen = 30
-maxProLen = 0
-seqType = "both"
-force = False
-noORfNum = False
-signalpdir = r"D:\Bioinformatics\Protein_analysis\signalp-4.1f.CYGWIN\signalp-4.1"
-signalporg = "euk"
-cygwindir = r""
-## END
-
-xRegex = re.compile(r'X+')                                              # Regex used to find start and stop positions of unresolved regions that are shorter than the cut-off
-                
-### RATIONALE FOR UNRESOLVED REGIONS ###
-# I had to decide how to handle unresolved regions. I believe there are two valid approaches to this. The first is to replace any unresolved regions with stop codons and let the rest of the script process it like normal.
-# This appears to be what NCBI does for their ORF Finder. The benefits of this approach is that you can't accidentally form chimeras. However, I think there is a second approach that has merit. If you are working with a genome that has
-# short and rare occurrences of unresolved regions, you might not want to split up large ORFs on the basis of them having a very short stretch of unresolved codons. In this case, we can choose to not replace unresolved regions with stop codons
-# if the region is shorter than an arbitrary and small limit. This isn't exactly perfect since even very short unresolved regions might hide stop codons. Thus, this option should be OFF by default, but we can provide the users an
-# on/off switch so they can decide whether they want to risk discovering chimeric ORFs - providing a text prompt if the option is switched ON to verify any ORFs with unresolved regions would wash my hands of any mistake.
-
-#if args.unresolvedCodon != 0:
-if unresolvedCodon != 0:
-        print('Program has noted that you are allowing the discovery of ORFs with unresolved codon regions. This is risky behaviour, since this program cannot guarantee that an unresolved region does not contain a stop codon. Subsequently, you can have chimeras form from two separate ORFs. YOU MUST VERIFY ANY ORFS WITH UNRESOLVED REGIONS! The best way to do this is with BLAST against homologous proteins. You have been warned.')
-
-# Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
-#records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
-#records = SeqIO.parse(open(fileName, 'r'), 'fasta')
-#totalCount = 0
-#for record in records:
-#        totalCount += 1
-#records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
-records = SeqIO.parse(open(fileName, 'r'), 'fasta')
-
-### CORE PROCESSING LOOP
-print('Starting the core processing of this script now. Progress bar is displayed below. Every 10,000 sequences, current progress will be saved to the output file(s) to reduce memory footprint.')
-
-# Declare overall values needed before loop start
-ongoingCount = 0
-outputProt = []                                 # These get reset whenever we output to file
-outputNucl = []
-
-# Get the nucleotide (record) out of our generator (records) and grab them ORFs!
-for record in records:
-        tempOverallProt = []
-        tempOverallNucl = []
-        # Parental loop
+def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen, maxProLen, signalpdir, signalporg, cygwindir):
+        xRegex = re.compile(r'X+')                                              # Regex used to find start and stop positions of unresolved regions that are shorter than the cut-off
+        prots = []
+        nucs = []
         for strand, nuc in [(+1, record.seq), (-1, record.seq.reverse_complement())]:
                 for frame in range(3):
                         nuc = nuc.upper() # Just in case?
                         length = 3 * ((len(record)-frame) // 3)
                         frameNuc = str(nuc[frame:frame+length])
-                        #frameProt = str(nuc[frame:frame+length].translate(table=args.translationTable))
                         frameProt = str(nuc[frame:frame+length].translate(table=translationTable))
                         # Split protein/nucleotide into corresponding ORFs
                         ongoingLength = 0                                       # The ongoingLength will track where we are along the unresolvedProt sequence for getting the nucleotide sequence
@@ -369,8 +262,7 @@ for record in records:
                                 if 'X' in splitProtein[i]:
                                         posProt = []
                                         for x in re.finditer(xRegex, splitProtein[i]):
-                                                #if x.end() - x.start() > args.unresolvedCodon:
-                                                if x.end() - x.start() > unresolvedCodon:
+                                                if x.end() - x.start() > unresolvedCodonLen:
                                                         posProt += [x.start(), x.end()]
                                         if posProt == []:                                               # If posProt still == [], that means we didn't find any unresolved regions that exceed our cut-off
                                                 continue
@@ -393,16 +285,12 @@ for record in records:
                         splitNucleotide += resolvedNuc
 
                         # Enter the main processing loop with our resolved regions
-                        prots = []
-                        nucs = []
                         for i in range(len(splitProtein)):                                                      # Note that I have done a 'for i in range...' loop rather than a 'for value in splitProtein' loop which would have been simpler for a reason explained below on the 'elif i + 1 ==' line
                                 # Declare blank values needed for each potential ORF region so we can tell which things were 'found'
                                 noneCodonContingency = None
                                 # Process sequences to determine whether we're ignoring this, or adding an asterisk for length counts
-                                #if len(splitProtein[i]) < args.minProLen:                    # Disregard sequences that won't meet the size requirement without further processing
                                 if len(splitProtein[i]) < minProLen:                    # Disregard sequences that won't meet the size requirement without further processing
                                         continue
-                                #elif args.maxProLen != 0 and len(splitProtein[i]) > args.maxProLen:
                                 elif maxProLen != 0 and len(splitProtein[i]) > maxProLen:
                                         continue
                                 acceptedPro = str(splitProtein[i])
@@ -410,7 +298,7 @@ for record in records:
                                 ## Canonical start coding
                                 ALLOWED_SHORT_RATIO = 0.50 # Arbitrary; we want to prevent a sequence from being shortened excessively
                                 ABSOLUTE_SHORTEN_LEN = 50 # Arbitrary; we want to prevent a sequence being shortened more than is "realistic" in search of a start codon
-                                allowedShortenLen = int(round(len(acceptedPro)*ALLOWED_SHORT_RATIO, 0))
+                                allowedShortenLen = min([int(round(len(acceptedPro)*ALLOWED_SHORT_RATIO, 0)), ABSOLUTE_SHORTEN_LEN])
                                 
                                 startIndices = []
                                 for x in range(0, len(acceptedPro)):
@@ -419,23 +307,21 @@ for record in records:
                                 ## Alternative start coding
                                 nucSeqOfProt = splitNucleotide[i]                       # Don't need to do it, but old version of script extensively uses this value and cbf changing it
                                 codons = re.findall('..?.?', nucSeqOfProt)              # Pulls out a list of codons from the nucleotide
-                                for codon in codons:                                    # Cycle through this list of codons to find the first alternative start of the normal class (GTG and TTG) and the rare class (CTG)
+                                for x in range(len(codons)):                            # Cycle through this list of codons to find the first alternative start of the normal class (GTG and TTG) and the rare class (CTG)
+                                        codon = codons[x]
                                         if codon == 'GTG' or codon == 'TTG':
-                                                index = codons.index(codon)
-                                                if index <= allowedShortenLen:
-                                                        startIndices.append([index, 1]) # This will save the position of the first GTG or TTG encountered. Note that by breaking after this,  we stop looking for CTG as it is irrelevant after this
-                                                break
+                                                if x <= allowedShortenLen:
+                                                        startIndices.append([x, 1])     # This will save the position of the first GTG or TTG encountered.
                                         elif codon == 'CTG':
                                                 if noneCodonContingency == None:        # noneCodonContingency is set to None at the end of each loop. Thus, this line of code will 'capture' the position of the first CTG in a sequence if a GTG or TTG was not encountered first
-                                                        index = codons.index(codon)
-                                                        if index <= allowedShortenLen:
-                                                                startIndices.append([index, 2])
+                                                        if x <= allowedShortenLen:
+                                                                startIndices.append([x, 2])
+                                                                noneCodonContingency = True # Stop accepting CTGs after the first to prevent "contamination"
                                 startIndices.sort(key = lambda x: x[0])
                                 # Skip if no hits are obtained
                                 if startIndices == []:
                                         continue
                                 # Skip the hit if it doesn't meet our minimum length requirement anymore
-                                #if len(acceptedPro[startIndices[0][0]:]) < args.minProLen: # Culling is necessary since we will have shortened the sequence somewhat unless we accepted the topHit as being a no codon start ORF. Note that we will here consider a stop codon in the length of the protein, such that a protein with 99AAs and a stop will pass a minimum 100AA length test. I think this is fair since not all regions here have a stop codon which allows weight to be added to these cases, especially since a stop codon is still conserved as part of an ORF.
                                 if len(acceptedPro[startIndices[0][0]:]) < minProLen: # Culling is necessary since we will have shortened the sequence somewhat unless we accepted the topHit as being a no codon start ORF. Note that we will here consider a stop codon in the length of the protein, such that a protein with 99AAs and a stop will pass a minimum 100AA length test. I think this is fair since not all regions here have a stop codon which allows weight to be added to these cases, especially since a stop codon is still conserved as part of an ORF.
                                         continue
                                 # Cull individual start sites that don't meet our minimum length requirement
@@ -459,7 +345,6 @@ for record in records:
                                         seqIDs.append(str(x))
                                         indexProts.append(acceptedPro[startIndices[x][0]:])
                                 # Run signalP prediction and associate relevant results
-                                #sigpPredictions = run_signalp_sequence(str(args.signalpdir), args.cygwindir, args.signalporg, str(args.signalpdir), seqIDs, indexProts)
                                 sigpPredictions = run_signalp_sequence(str(signalpdir), cygwindir, signalporg, str(signalpdir), seqIDs, indexProts)
                                 if sigpPredictions == {}:
                                         continue
@@ -497,41 +382,193 @@ for record in records:
                                 nucleotide = nucSeqOfProt[bestCandidate[0]*3:]
                                 prots.append(protein)
                                 nucs.append(nucleotide)
+        return prots, nucs
 
+def record_worker(recordQ, outputQ, translationTable, unresolvedCodon, minProLen, maxProLen, signalpdir, signalporg, cygwindir):
+        NoneType = type(None)
+        while True:
+                # Continue condition
+                if recordQ.empty():
+                        time.sleep(0.5)
+                        continue
+                # Grabbing condition
+                record = recordQ.get()
+                # Exit condition
+                if type(record) == NoneType: # SeqIO doesn't allow comparison, need to do it another way
+                        recordQ.task_done()
+                        break
+                # Perform work
+                prots, nucs = orf_find_from_record(record, translationTable, unresolvedCodon, minProLen, maxProLen, signalpdir, signalporg, cygwindir)
+                outputQ.put([record.description, prots, nucs])
+                # Mark work completion
+                recordQ.task_done()
 
-        # Format and produce the output of this script
-        tempOutputProt = []
-        tempOutputNucl = []
-        if args.sequenceType.lower() == 'prot' or args.sequenceType.lower() == 'both':
-                for i in range(0, args.hitsToPull):                          
-                        if tempOverallProt[i] == '-':                   # Because we made sure all the tempM/Alt/NoneLists had '-' added to pad out the list to have a length equal to the value of hitsToPull, when we cycle through our tempOverallList, we will often encounter '-' characters which signify the end of relevant ORFs identified in this sequence  
-                                break                                   # Break out of this loop once we've fasta formatted all relevant ORF hits
-                        if args.noOrfNum == False:
-                                tempOutputProt.append('>' + record.id + '_ORF' + str(i+1) + '\n' + tempOverallProt[i])
-                        else:
-                                tempOutputProt.append('>' + record.id + '\n' + tempOverallProt[i])
-                if len(tempOutputProt) > 0:    # Need this check for sequences that don't get any hits
-                        outputProt.append('\n'.join(tempOutputProt))
+def output_worker(outputQ, totalCount, outputFileName, sequenceType, protOutName, nuclOutName):
+        ongoingCount = 0
+        rememberPrint = -1
+        while True:
+                # Continue condition
+                if outputQ.empty():
+                        time.sleep(0.5)
+                        continue
+                # Grabbing condition
+                output = outputQ.get()
+                # Exit condition
+                if output == None:
+                        outputQ.task_done()
+                        break
+                # Perform work
+                output_func(output[0], output[1], output[2], outputFileName, sequenceType, protOutName, nuclOutName)
+                # Update progress bar
+                ongoingCount += 1
+                progress = ((ongoingCount)/totalCount)*100
+                if int(progress)%1==0 and rememberPrint != int(progress):
+                        print('|' + str(int(progress)) + '% progress|' + str(ongoingCount+1) + ' sequences scanned for ORFs', end = '\r')       # Need to +1 to ongoingCount to counteract 0-index
+                        rememberPrint = int(progress)
+                # Mark work completion
+                outputQ.task_done()
 
-        if args.sequenceType.lower() == 'nucl' or args.sequenceType.lower() == 'both':
-                for i in range(0, args.hitsToPull):                          
-                        if tempOverallNucl[i] == '-':                   # Because we made sure all the tempM/Alt/NoneLists had '-' added to pad out the list to have a length equal to the value of hitsToPull, when we cycle through our tempOverallList, we will often encounter '-' characters which signify the end of relevant ORFs identified in this sequence  
-                                break                                   # Break out of this loop once we've fasta formatted all relevant ORF hits
-                        if args.noOrfNum == False:
-                                tempOutputNucl.append('>' + record.id + '_ORF' + str(i+1) + '\n' + tempOverallNucl[i])
-                        else:
-                                tempOutputNucl.append('>' + record.id + '\n' + tempOverallNucl[i])
-                if len(tempOutputNucl) > 0:
-                        outputNucl.append('\n'.join(tempOutputNucl))
+def output_func(seqID, outputProts, outputNucs, outputFileName, sequenceType, protOutName=None, nuclOutName=None):
+        # Create file(s) if necessary
+        if (sequenceType.lower() == "prot" or sequenceType.lower() == "nucl") and os.path.isfile(outputFileName) == False:
+                with open(outputFileName, 'w') as output:
+                        pass
+        elif os.path.isfile(protOutName) == False:
+                with open(protOutName, 'w') as output:
+                        pass
+        elif os.path.isfile(nuclOutName) == False:
+                with open(nuclOutName, 'w') as output:
+                        pass
+        # Derive sequence IDs
+        seqIDs = []
+        for i in range(len(outputProts)):
+                seqIDs.append(">{0}_ORF{1}".format(seqID, str(i+1)))
+        # Write to relevant file(s)
+        if sequenceType.lower() == "prot":
+                with open(outputFileName, "a") as output:
+                        for i in range(len(seqIDs)):
+                                output.write("{0}\n{1}\n".format(seqIDs[i], outputProts[i]))
+        elif sequenceType.lower() == 'nucl':
+                with open(outputFileName, "a") as output:
+                        for i in range(len(seqIDs)):
+                                output.write("{0}\n{1}\n".format(seqIDs[i], outputNucs[i]))
+        else:
+                with open(protOutName, "a") as protFile, open(nuclOutName, "a") as nuclFile:
+                        for i in range(len(seqIDs)):
+                                protFile.write("{0}\n{1}\n".format(seqIDs[i], outputProts[i]))
+                                nuclFile.write("{0}\n{1}\n".format(seqIDs[i], outputNucs[i]))
 
-        ongoingCount += 1
-        
-        # Save backup if ongoingCount == 10,000. There are two sections here, the first will create the file on the first loop, the second will add to the file on subsequent loops
-        outputProt, outputNucl = output_func(outputProt, outputNucl, ongoingCount, args.outputFileName, args.sequenceType, 'processing', args.protOutName, args.nuclOutName)
+### USER INPUT
+usage = """%(prog)s reads in a fasta formatted file containing nucleotide sequences and, following user-specified parameters,
+produces an output fasta file containing potential open reading frames (ORFs) as nucleotides/protein translations/both.
+"""
+# Reqs
+p = argparse.ArgumentParser(description=usage)
+p.add_argument("-i", "-input", dest="fileName",
+                   help="Input fasta file name")
+p.add_argument("-o", "-output", dest="outputFileName",
+                   help="Output fasta file name")
+# Opts
+p.add_argument("-min", "--minimum", type=int, dest="minProLen",
+                   help="Minimum ORF amino acid length. Default == 30.", default=30)
+p.add_argument("-max", "--maximum", type=int, dest="maxProLen",
+                   help="Optional specification for maximum ORF amino acid length. Default == 0, which means there is no upper limit.", default=0)
+p.add_argument("-st", "--seqtype", dest="sequenceType", choices = ['prot', 'nucl', 'both', 'PROT', 'NUCL', 'BOTH'],
+                   help="Specify the type of output you want to generate (i.e., protein translated ORF, nucleotide CDS, or both). If you specify 'both', two outputs with '_prot' and '_nucl' suffix will be generated. Default == 'prot'.", default="prot")
+p.add_argument("-f", "--force", dest="force", action="store_true", default=False,
+                   help="Allow files to be overwritten at your own risk.")
+p.add_argument("-u", "--unresolved", dest="unresolvedCodon", type=int,
+                   help="Default == 0, which means the program will not discover ORFs with unresolved codons. If you want to risk chimeric ORF formation, you can change this value. You MUST validate any ORFs with unresolved portions. Recommended for this value to be less than 5.", default=0)
+p.add_argument("-n", "--no_orf_num", dest="noOrfNum", action='store_true',
+                   help="Provide this argument to prevent ORF nums being appended to sequence IDs. This can be useful when obtaining 1 ORF per transcript.", default=False)
+p.add_argument("-t", "--translation", dest="translationTable", type=int, default=1,
+                   help="Optionally specify the NCBI numeric genetic code to utilise for CDS translation (if relevant); this should be an integer from 1 to 31 (default == 1 i.e., Standard Code)")
+p.add_argument("-c", "--cpus", type=int, dest="cpus",
+                   help="Number of threads to run. Default == 1.", default=1)
+# SignalP opts
+p.add_argument("-sigpdir", "-signalpdir", dest="signalpdir", type=str,
+               help="""Specify the directory where signalp executables are located.""")
+p.add_argument("-sigporg", dest="signalporg", type = str, choices = ['euk', 'gram-', 'gram+'], default='euk',
+               help="""Specify the type of organism for SignalP from the available
+               options. Refer to the SignalP manual if unsure what these mean (default == 'euk').""")
+p.add_argument("-c", "-cygwindir", dest="cygwindir", type=str, default="",
+               help="""Cygwin is required since you are running this program on a Windows computer.
+               Specify the location of the bin directory here or, if this is already in your PATH, you can leave this blank."""
+               if platform.system() == 'Windows' else argparse.SUPPRESS)
 
-# Dump the last few results after the script has finished, or create the output if there were less than 10,000 sequences
-outputProt, outputNucl = output_func(outputProt, outputNucl, ongoingCount, args.outputFileName, args.sequenceType, 'final', args.protOutName, args.nuclOutName)
+## HARD-CODED TESTING
+#args = p.parse_args()
+#args = validate_args(args)
+#fileName = r"F:\toxins_annot\analysis\sigp_orf_testing\Telmatactis.fa"
+fileName = r"F:\toxins_annot\analysis\sigp_orf_testing\egs.fasta"
+outputFileName = r"F:\toxins_annot\analysis\sigp_orf_testing\orfs.fasta"
+protOutName = r"F:\toxins_annot\analysis\sigp_orf_testing\orfs_prots.fasta"
+nuclOutName = r"F:\toxins_annot\analysis\sigp_orf_testing\orfs_nucls.fasta"
+sequenceType = "both"
+translationTable = 1
+unresolvedCodon = 0
+minProLen = 30
+maxProLen = 0
+seqType = "both"
+force = False
+noORfNum = False
+signalpdir = r"D:\Bioinformatics\Protein_analysis\signalp-4.1f.CYGWIN\signalp-4.1"
+signalporg = "euk"
+cygwindir = r""
+cpus = 4
+## END
+                
+### RATIONALE FOR UNRESOLVED REGIONS ###
+# I had to decide how to handle unresolved regions. I believe there are two valid approaches to this. The first is to replace any unresolved regions with stop codons and let the rest of the script process it like normal.
+# This appears to be what NCBI does for their ORF Finder. The benefits of this approach is that you can't accidentally form chimeras. However, I think there is a second approach that has merit. If you are working with a genome that has
+# short and rare occurrences of unresolved regions, you might not want to split up large ORFs on the basis of them having a very short stretch of unresolved codons. In this case, we can choose to not replace unresolved regions with stop codons
+# if the region is shorter than an arbitrary and small limit. This isn't exactly perfect since even very short unresolved regions might hide stop codons. Thus, this option should be OFF by default, but we can provide the users an
+# on/off switch so they can decide whether they want to risk discovering chimeric ORFs - providing a text prompt if the option is switched ON to verify any ORFs with unresolved regions would wash my hands of any mistake.
+
+#if args.unresolvedCodon != 0:
+if unresolvedCodon != 0:
+        print('Program has noted that you are allowing the discovery of ORFs with unresolved codon regions. This is risky behaviour, since this program cannot guarantee that an unresolved region does not contain a stop codon. Subsequently, you can have chimeras form from two separate ORFs. YOU MUST VERIFY ANY ORFS WITH UNRESOLVED REGIONS! The best way to do this is with BLAST against homologous proteins. You have been warned.')
+
+# Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
+#records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
+records = SeqIO.parse(open(fileName, 'r'), 'fasta')
+totalCount = 0
+for record in records:
+        totalCount += 1
+#records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
+records = SeqIO.parse(open(fileName, 'r'), 'fasta')
+
+### CORE PROCESSING LOOP
+
+# Set up queues
+recordQ = queue.Queue(maxsize=50) # Arbitrary size; attempt to limit memory usage
+outputQ = queue.Queue(maxsize=10000) # Arbitary size; attempt to limit memory usage
+
+# Start threads
+#for i in range(args.cpus):
+for i in range(cpus):
+        #worker = Thread(target= record_worker, args=(recordQ, outputQ, args.translationTable, args.unresolvedCodon, args.minProLen, args.maxProLen, args.signalpdir, args.signalporg, args.cygwindir))
+        worker = Thread(target= record_worker, args=(recordQ, outputQ, translationTable, unresolvedCodon, minProLen, maxProLen, signalpdir, signalporg, cygwindir))
+        worker.setDaemon(True)
+        worker.start()
+#outputWorker = Thread(target = output_worker, args=(outputQ, args.outputFileName, args.sequenceType, args.protOutName, args.nuclOutName))
+outputWorker = Thread(target = output_worker, args=(outputQ, totalCount, outputFileName, sequenceType, protOutName, nuclOutName))
+outputWorker.setDaemon(True)
+outputWorker.start()
+
+# Put record in queue for worker threads
+print('Starting the core processing of this script now. Progress bar will display below in a moment.')
+for record in records:
+        recordQ.put(record)
 records.close()
+
+# Close up shop on the threading structures
+for i in range(cpus):
+        recordQ.put(None) # Add marker for record_workers to end
+recordQ.join()
+print("recordQ joined")
+outputQ.put(None) # Add marker for output_worker to end
+outputQ.join()
 
 #### SCRIPT ALL DONE
 print('Program completed successfully!')
