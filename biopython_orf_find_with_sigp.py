@@ -31,8 +31,8 @@ def validate_args(args):
         if args.unresolvedCodon < 0:
                 print("unresolvedCodon must be >= 1. Fix your input and try again.")
                 quit()
-        if args.cpus < 0:
-                print("cpus must be >= 1. Fix your input and try again.")
+        if args.threads < 0:
+                print("threads must be >= 1. Fix your input and try again.")
                 quit()
         if args.translationTable < 1 or args.translationTable > 31:
                 print('-t translationTable value ranging from 1 to 31 inclusive. Fix this and try again.')
@@ -41,9 +41,7 @@ def validate_args(args):
         if args.cygwindir == None:
                 args.cygwindir = ''
         if args.signalpdir == None:
-                args.signalpdir = ''
-        if args.signalpdir == None:
-                print('signalpdir argument was not specified when -signalp was provided; fix your input and try again.')
+                print('signalpdir argument was not specified; fix your input and try again.')
                 quit()
         if not os.path.isfile(os.path.join(args.signalpdir, 'signalp')):
                 print('I am unable to locate the signalp execution file "signalp" within specified directory (' + args.signalpdir + ')')
@@ -51,7 +49,7 @@ def validate_args(args):
                 quit()
         if platform.system() == 'Windows':
                 program_execution_check(os.path.join(args.cygwindir, 'bash.exe --version'))
-                cygwin_program_execution_check(os.path.dirname(args.outputFileName), args.cygwindir, args.signalpdir, 'signalp -h')
+                cygwin_program_execution_check(os.path.dirname(os.path.abspath(args.outputFileName)), args.cygwindir, args.signalpdir, 'signalp -h')
         else:
                 program_execution_check(os.path.join(args.signalpdir, 'signalp -h'))
         # Validate output file location
@@ -479,45 +477,24 @@ p.add_argument("-f", "--force", dest="force", action="store_true", default=False
                    help="Allow files to be overwritten at your own risk.")
 p.add_argument("-u", "--unresolved", dest="unresolvedCodon", type=int,
                    help="Default == 0, which means the program will not discover ORFs with unresolved codons. If you want to risk chimeric ORF formation, you can change this value. You MUST validate any ORFs with unresolved portions. Recommended for this value to be less than 5.", default=0)
-p.add_argument("-n", "--no_orf_num", dest="noOrfNum", action='store_true',
-                   help="Provide this argument to prevent ORF nums being appended to sequence IDs. This can be useful when obtaining 1 ORF per transcript.", default=False)
-p.add_argument("-t", "--translation", dest="translationTable", type=int, default=1,
+p.add_argument("-tr", "--translation", dest="translationTable", type=int, default=1,
                    help="Optionally specify the NCBI numeric genetic code to utilise for CDS translation (if relevant); this should be an integer from 1 to 31 (default == 1 i.e., Standard Code)")
-p.add_argument("-c", "--cpus", type=int, dest="cpus",
-                   help="Number of threads to run. Default == 1.", default=1)
+p.add_argument("-th", "--threads", type=int, dest="threads",
+                   help="Number of threads to run. Default == 1, recommended == n-1.", default=1)
 # SignalP opts
-p.add_argument("-sigpdir", "-signalpdir", dest="signalpdir", type=str,
+p.add_argument("-sdir", "--signalpdir", dest="signalpdir", type=str,
                help="""Specify the directory where signalp executables are located.""")
-p.add_argument("-sigporg", dest="signalporg", type = str, choices = ['euk', 'gram-', 'gram+'], default='euk',
+p.add_argument("-sorg", "--signalporg", dest="signalporg", type = str, choices = ['euk', 'gram-', 'gram+'], default='euk',
                help="""Specify the type of organism for SignalP from the available
                options. Refer to the SignalP manual if unsure what these mean (default == 'euk').""")
-p.add_argument("-c", "-cygwindir", dest="cygwindir", type=str, default="",
+p.add_argument("-c", "--cygwindir", dest="cygwindir", type=str, default="",
                help="""Cygwin is required since you are running this program on a Windows computer.
                Specify the location of the bin directory here or, if this is already in your PATH, you can leave this blank."""
                if platform.system() == 'Windows' else argparse.SUPPRESS)
 
-## HARD-CODED TESTING
-#args = p.parse_args()
-#args = validate_args(args)
-#fileName = r"F:\toxins_annot\analysis\sigp_orf_testing\Telmatactis.fa"
-fileName = r"F:\toxins_annot\analysis\sigp_orf_testing\egs.fasta"
-outputFileName = r"F:\toxins_annot\analysis\sigp_orf_testing\orfs.fasta"
-protOutName = r"F:\toxins_annot\analysis\sigp_orf_testing\orfs_prots.fasta"
-nuclOutName = r"F:\toxins_annot\analysis\sigp_orf_testing\orfs_nucls.fasta"
-sequenceType = "both"
-translationTable = 1
-unresolvedCodon = 0
-minProLen = 30
-maxProLen = 0
-seqType = "both"
-force = False
-noORfNum = False
-signalpdir = r"D:\Bioinformatics\Protein_analysis\signalp-4.1f.CYGWIN\signalp-4.1"
-signalporg = "euk"
-cygwindir = r""
-cpus = 4
-## END
-                
+args = p.parse_args()
+args = validate_args(args)
+
 ### RATIONALE FOR UNRESOLVED REGIONS ###
 # I had to decide how to handle unresolved regions. I believe there are two valid approaches to this. The first is to replace any unresolved regions with stop codons and let the rest of the script process it like normal.
 # This appears to be what NCBI does for their ORF Finder. The benefits of this approach is that you can't accidentally form chimeras. However, I think there is a second approach that has merit. If you are working with a genome that has
@@ -525,18 +502,15 @@ cpus = 4
 # if the region is shorter than an arbitrary and small limit. This isn't exactly perfect since even very short unresolved regions might hide stop codons. Thus, this option should be OFF by default, but we can provide the users an
 # on/off switch so they can decide whether they want to risk discovering chimeric ORFs - providing a text prompt if the option is switched ON to verify any ORFs with unresolved regions would wash my hands of any mistake.
 
-#if args.unresolvedCodon != 0:
-if unresolvedCodon != 0:
+if args.unresolvedCodon != 0:
         print('Program has noted that you are allowing the discovery of ORFs with unresolved codon regions. This is risky behaviour, since this program cannot guarantee that an unresolved region does not contain a stop codon. Subsequently, you can have chimeras form from two separate ORFs. YOU MUST VERIFY ANY ORFS WITH UNRESOLVED REGIONS! The best way to do this is with BLAST against homologous proteins. You have been warned.')
 
 # Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
-#records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
-records = SeqIO.parse(open(fileName, 'r'), 'fasta')
+records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
 totalCount = 0
 for record in records:
         totalCount += 1
-#records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
-records = SeqIO.parse(open(fileName, 'r'), 'fasta')
+records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
 
 ### CORE PROCESSING LOOP
 
@@ -545,14 +519,11 @@ recordQ = queue.Queue(maxsize=50) # Arbitrary size; attempt to limit memory usag
 outputQ = queue.Queue(maxsize=10000) # Arbitary size; attempt to limit memory usage
 
 # Start threads
-#for i in range(args.cpus):
-for i in range(cpus):
-        #worker = Thread(target= record_worker, args=(recordQ, outputQ, args.translationTable, args.unresolvedCodon, args.minProLen, args.maxProLen, args.signalpdir, args.signalporg, args.cygwindir))
-        worker = Thread(target= record_worker, args=(recordQ, outputQ, translationTable, unresolvedCodon, minProLen, maxProLen, signalpdir, signalporg, cygwindir))
+for i in range(args.threads):
+        worker = Thread(target= record_worker, args=(recordQ, outputQ, args.translationTable, args.unresolvedCodon, args.minProLen, args.maxProLen, args.signalpdir, args.signalporg, args.cygwindir))
         worker.setDaemon(True)
         worker.start()
-#outputWorker = Thread(target = output_worker, args=(outputQ, args.outputFileName, args.sequenceType, args.protOutName, args.nuclOutName))
-outputWorker = Thread(target = output_worker, args=(outputQ, totalCount, outputFileName, sequenceType, protOutName, nuclOutName))
+outputWorker = Thread(target = output_worker, args=(outputQ, totalCount, args.outputFileName, args.sequenceType, args.protOutName, args.nuclOutName))
 outputWorker.setDaemon(True)
 outputWorker.start()
 
@@ -563,10 +534,9 @@ for record in records:
 records.close()
 
 # Close up shop on the threading structures
-for i in range(cpus):
+for i in range(args.threads):
         recordQ.put(None) # Add marker for record_workers to end
 recordQ.join()
-print("recordQ joined")
 outputQ.put(None) # Add marker for output_worker to end
 outputQ.join()
 
