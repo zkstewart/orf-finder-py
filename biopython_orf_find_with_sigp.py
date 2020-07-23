@@ -6,7 +6,7 @@
 # Addition: This script will seek out ORFs with signal peptide start sites
 
 # Load packages
-import re, os, argparse, platform, subprocess, time, hashlib, queue, random
+import re, os, argparse, platform, subprocess, time, hashlib, queue, random, shutil
 from Bio import SeqIO
 from pathlib import Path
 from threading import Thread
@@ -172,7 +172,7 @@ def run_signalp_sequence(signalpdir, cygwindir, organism, tmpDir, seqID, protStr
                                 continue
                         sl = line.split('\t')
                         sigPredictions[sl[0]] = [int(sl[3]), int(sl[4]), float(sl[5])] # [start, stop, score]
-        # Clean up temporary 
+        # Clean up temporary files
         os.remove(tmpFileName)
         os.remove(sigpResultFile)
         # Return signalP prediction dictionary
@@ -182,10 +182,11 @@ def signalp_unthreaded(signalpdir, cygwindir, organism, tmpDir, fastaFile, sigpR
         # Get the full fasta file location
         fastaFile = os.path.abspath(fastaFile)
         # Format signalP script text
-        scriptText = '"' + os.path.join(signalpdir, 'signalp') + '" -t ' + organism + ' -f short -n "' + sigpResultFile + '" "' + fastaFile + '"'
+        sigpTmpDir = tmp_file_name_gen(os.path.join(signalpdir, 'tmp_sigp_run_'), '', str(time.time()) + sigpResultFile)
+        scriptText = '"{0}" -t {1} -f short -n "{2}" -T "{3}" "{4}"'.format(os.path.join(signalpdir, 'signalp'), organism, sigpResultFile, sigpTmpDir, fastaFile)
         # Generate a script for use with cygwin (if on Windows)
         if platform.system() == 'Windows':
-                sigpScriptFile = os.path.join(tmpDir, tmp_file_name_gen('tmp_sigpScript_' + os.path.basename(fastaFile), '.sh', scriptText + str(time.time())))
+                sigpScriptFile = os.path.join(tmpDir, tmp_file_name_gen('tmp_sigpScript_', '.sh', scriptText + str(time.time())))
                 with open(sigpScriptFile, 'w') as fileOut:
                         fileOut.write(scriptText.replace('\\', '/'))
         # Run signalP depending on operating system
@@ -199,7 +200,7 @@ def signalp_unthreaded(signalpdir, cygwindir, organism, tmpDir, fastaFile, sigpR
                 runsigP = subprocess.Popen(scriptText, stdout = subprocess.DEVNULL, stderr = subprocess.PIPE, shell = True)
                 sigpout, sigperr = runsigP.communicate()
         # Process output
-        okayLines = ['is an unknown amino amino acid', 'perl: warning:', 'LC_ALL =', 'LANG =', 'are supported and installed on your system']
+        okayLines = ['is an unknown amino amino acid', 'perl: warning:', 'LC_ALL =', 'LANG =', 'are supported and installed on your system', '# temporary directory will not be removed']
         for line in sigperr.decode("utf-8").split('\n'):
                 # If sigperr indicates null result, create an output file we can skip later
                 if line.rstrip('\n') == '# No sequences predicted with a signal peptide':
@@ -217,6 +218,9 @@ def signalp_unthreaded(signalpdir, cygwindir, organism, tmpDir, fastaFile, sigpR
                 # If nothing matches the okayLines list, we have a potentially true error
                 else:
                         raise Exception('SignalP error occurred when processing file name ' + fastaFile + '. Error text below\n' + sigperr.decode("utf-8"))
+        # Clean up tmp dir
+        if os.path.isdir(sigpTmpDir):
+                shutil.rmtree(sigpTmpDir)
 
 def tmp_file_name_gen(prefix, suffix, hashString):
         # Main function
@@ -343,7 +347,10 @@ def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen
                                         seqIDs.append(str(x))
                                         indexProts.append(acceptedPro[startIndices[x][0]:])
                                 # Run signalP prediction and associate relevant results
-                                sigpPredictions = run_signalp_sequence(str(signalpdir), cygwindir, signalporg, str(signalpdir), seqIDs, indexProts)
+                                tmpDir = os.path.join(signalpdir, tmp_file_name_gen("tmp_orf_find_", "", str(time.time())))
+                                os.mkdir(tmpDir)
+                                sigpPredictions = run_signalp_sequence(str(signalpdir), cygwindir, signalporg, tmpDir, seqIDs, indexProts)
+                                os.rmdir(tmpDir)
                                 if sigpPredictions == {}:
                                         continue
                                 sigpIndices = []
