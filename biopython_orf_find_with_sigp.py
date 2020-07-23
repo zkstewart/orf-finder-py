@@ -220,7 +220,7 @@ def signalp_unthreaded(signalpdir, cygwindir, organism, tmpDir, fastaFile, sigpR
 
 def tmp_file_name_gen(prefix, suffix, hashString):
         # Main function
-        tmpHash = hashlib.md5(bytes(str(hashString) + str(time.time()) + str(random.randint(0, 100000)), 'utf-8') ).hexdigest()       # This should always give us something unique even if the string for hashString is the same across different runs
+        tmpHash = hashlib.sha256(bytes(str(hashString) + str(time.time()) + str(random.randint(0, 100000)), 'utf-8') ).hexdigest()       # This should always give us something unique even if the string for hashString is the same across different runs
         while True:
                 if os.path.isfile(prefix + tmpHash + suffix):
                         tmpHash += 'X'
