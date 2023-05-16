@@ -6,10 +6,12 @@
 # Addition: This script will seek out ORFs with signal peptide start sites
 
 # Load packages
-import re, os, argparse, platform, subprocess, time, hashlib, queue, random, shutil
+import re, os, argparse, time, hashlib, queue, random
 from Bio import SeqIO
-from pathlib import Path
 from threading import Thread
+
+# Load package from submodule
+from Various_scripts import ZS_SignalPIO, ZS_SeqIO
 
 # Define functions for later use [Rewriting this script would make it so much prettier/easy to manage...]
 def validate_args(args):
@@ -38,20 +40,13 @@ def validate_args(args):
         print('-t translationTable value ranging from 1 to 31 inclusive. Fix this and try again.')
         quit()
     # Validate accessory program locations
-    if args.cygwindir == None:
-        args.cygwindir = ''
-    if args.signalpdir == None:
-        print('signalpdir argument was not specified; fix your input and try again.')
+    if args.signalpExe == None:
+        print('signalpExe argument was not specified; fix your input and try again.')
         quit()
-    if not os.path.isfile(os.path.join(args.signalpdir, 'signalp')):
-        print('I am unable to locate the signalp execution file "signalp" within specified directory (' + args.signalpdir + ')')
+    if not os.path.isfile(os.path.join(args.signalpExe)):
+        print('I am unable to locate the signalp execution file at the specified location (' + args.signalpExe + ')')
         print('Make sure you\'ve typed the file name or location correctly and try again.')
         quit()
-    if platform.system() == 'Windows':
-        program_execution_check(os.path.join(args.cygwindir, 'bash.exe --version'))
-        cygwin_program_execution_check(os.path.dirname(os.path.abspath(args.outputFileName)), args.cygwindir, args.signalpdir, 'signalp -h')
-    else:
-        program_execution_check(os.path.join(args.signalpdir, 'signalp -h'))
     # Validate output file location
     args.outputFileName = os.path.abspath(args.outputFileName)
     if not os.path.isdir(os.path.dirname(args.outputFileName)):
@@ -90,148 +85,52 @@ def validate_args(args):
                 os.remove(args.nuclOutName)
     return args
 
-def program_execution_check(cmd):
-    run_cmd = subprocess.Popen(cmd, stdout = subprocess.PIPE, stderr = subprocess.PIPE, shell = True)
-    cmdout, cmderr = run_cmd.communicate()
-    if cmderr.decode("utf-8") != '' and not cmderr.decode("utf-8").startswith('Usage'):
-        print('Failed to execute program "' + cmd + '". Is this executable in the location specified/discoverable in your PATH, or does the executable even exist? I won\'t be able to run properly if I can\'t execute this program.')
-        print('---')
-        print('stderr is below for debugging purposes.')
-        print(cmderr.decode("utf-8"))
-        print('Program closing now.')
-        quit()
-
-def cygwin_program_execution_check(outDir, cygwinDir, exeDir, exeFile):
-    # Format script for cygwin execution
-    scriptText = Path(exeDir, exeFile).as_posix()
-    scriptFile = tmp_file_name_gen('tmpscript', '.sh', scriptText)
-    with open(os.path.join(outDir, scriptFile), 'w') as fileOut:
-        fileOut.write(scriptText)
-    # Format cmd for execution
-    cmd = os.path.join(cygwinDir, 'bash') + ' -l -c ' + os.path.join(outDir, scriptFile).replace('\\', '/')
-    run_cmd = subprocess.Popen(cmd, stdout = subprocess.PIPE, stderr = subprocess.PIPE, shell = True)
-    cmdout, cmderr = run_cmd.communicate()
-    os.remove(os.path.join(outDir, scriptFile))   # Clean up temporary file
-    if cmderr.decode("utf-8") != '' and not 'perl: warning: falling back to the standard locale' in cmderr.decode("utf-8").lower():
-        '''Need the above extra check for signalP since, on Windows at least, you can receive perl warnings which don't impact
-        program operations. I think if that 'falling back' line is in stderr, nothing more serious will be present in stderr -
-        this isn't completely tested, however.'''
-        print('Failed to execute ' + exeFile + ' program via Cygwin using "' + cmd + '". Is this executable in the location specified/discoverable in your PATH, or does the executable even exist? I won\'t be able to run properly if I can\'t execute this program.')
-        print('---')
-        print('stderr is below for debugging purposes.')
-        print(cmderr.decode("utf-8"))
-        print('Program closing now.')
-        quit()
-
-def run_signalp_sequence(signalpdir, cygwindir, organism, tmpDir, seqID, protString):
-    # Determine whether seqId and protString values are the proper type
-    if not type(seqID) == str and not type(protString) == str:
-        if not type(seqID) == list and not type(protString) == list:
-            print('run_signalp_sequence: seqID and protString inputs should both be str or both be list; this isn\'t true here, so I cannot procede.')
-            print('Fix the code leading up to this function call.')
-            quit()
-        # If they are lists, ensure they have the same length
-        else:
-            if len(seqID) != len(protString):
-                print('run_signalp_sequence: seqID and protString inputs are lists of nonequivalent length; I cannot procede unless this is true.')
-                print('Fix the code leading up to this function call.')
-                quit()
+def run_signalp_sequence(signalpExe, organism, seqID, protString):
+    # Coerce inputs into list
+    if isinstance(seqID, str):
+        seqID = [seqID]
+    if isinstance(protString, str):
+        protString = [protString]
+    assert len(seqID) == len(protString), \
+        "IDs and sequences lists don't match!"
+    
     # Generate temporary file for sequence
-    if type(seqID) == list:
-        while True:
-            tmpFileName = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpInput_' + ''.join([sid[0:5] for sid in seqID])[0:25] + '_'), '.fasta', ''.join([prot[0:10] for prot in protString]) + str(time.time()))
-            if os.path.isfile(tmpFileName):
-                continue
-            else:
-                break
-
-    else:
-        while True:
-            tmpFileName = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpInput_' + seqID + '_'), '.fasta', protString + str(time.time()))
-            if os.path.isfile(tmpFileName):
-                continue
-            else:
-                break
-    with open(tmpFileName, 'w') as fileOut:
-        if type(seqID) == list:
-            for i in range(len(seqID)):
-                fileOut.write('>' + seqID[i].lstrip('>') + '\n' + protString[i] + '\n')      # lstrip any > characters just in case they're already present
+    while True:
+        tmpHash = ZS_SeqIO.Conversion.get_hash_for_input_sequences("".join([pStr[0:50] for pStr in protString]))
+        tmpFileName = tmp_file_name_gen('tmp_sigpInput_', '.fasta', tmpHash, fullHashing=False)
+        if os.path.isfile(tmpFileName):
+            continue
         else:
-            fileOut.write('>' + seqID.lstrip('>') + '\n' + protString + '\n')
+            break
+    
+    with open(tmpFileName, 'w') as fileOut:
+        for i in range(len(seqID)):
+            fileOut.write('>' + seqID[i].lstrip('>') + '\n' + protString[i] + '\n')      # lstrip any > characters just in case they're already present
+    
     # Run signalP
-    if type(seqID) == list:
-        sigpResultFile = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpResults_' + ''.join([sid[0:5] for sid in seqID])[0:25] + '_'), '.txt', ''.join([prot[0:10] for prot in protString]) + str(time.time()))
-    else:
-        sigpResultFile = tmp_file_name_gen(os.path.join(tmpDir, 'tmp_sigpResults_' + seqID + '_'), '.txt', protString + str(time.time()))
-    signalp_unthreaded(signalpdir, cygwindir, organism, tmpDir, tmpFileName, sigpResultFile)
-    # Join and parse signalP results files
-    sigPredictions = {}
-    with open(sigpResultFile, 'r') as fileIn:
-        for line in fileIn:
-            if line.startswith('#'):
-                continue
-            sl = line.split('\t')
-            sigPredictions[sl[0]] = [int(sl[3]), int(sl[4]), float(sl[5])] # [start, stop, score]
+    sigpRunner = ZS_SignalPIO.SignalP(tmpFileName, signalpExe)
+    sigpRunner.organism = organism
+    sigPredictions = sigpRunner.signalp(withScore=True)
+    
     # Clean up temporary files
     os.remove(tmpFileName)
-    os.remove(sigpResultFile)
+    
     # Return signalP prediction dictionary
     return sigPredictions
 
-def signalp_unthreaded(signalpdir, cygwindir, organism, tmpDir, fastaFile, sigpResultFile):
-    # Get the full fasta file location
-    fastaFile = os.path.abspath(fastaFile)
-    # Format signalP script text
-    sigpTmpDir = tmp_file_name_gen(os.path.join(signalpdir, 'tmp_sigp_run_'), '', str(time.time()) + sigpResultFile)
-    scriptText = '"{0}" -t {1} -f short -n "{2}" -T "{3}" "{4}"'.format(os.path.join(signalpdir, 'signalp'), organism, sigpResultFile, sigpTmpDir, fastaFile)
-    # Generate a script for use with cygwin (if on Windows)
-    if platform.system() == 'Windows':
-        sigpScriptFile = os.path.join(tmpDir, tmp_file_name_gen('tmp_sigpScript_', '.sh', scriptText + str(time.time())))
-        with open(sigpScriptFile, 'w') as fileOut:
-            fileOut.write(scriptText.replace('\\', '/'))
-    # Run signalP depending on operating system
-    if platform.system() == 'Windows':
-        cmd = os.path.join(cygwindir, 'bash') + ' -l -c "' + sigpScriptFile.replace('\\', '/') + '"'
-        runsigP = subprocess.Popen(cmd, stdout = subprocess.DEVNULL, stderr = subprocess.PIPE, shell = True)
-        sigpout, sigperr = runsigP.communicate()
-        os.remove(sigpScriptFile)       # Clean up temporary file
-    else:
-        os.putenv("PYTHONPATH",os.pathsep.join([os.getenv("PYTHONPATH",""),signalpdir]))
-        runsigP = subprocess.Popen(scriptText, stdout = subprocess.DEVNULL, stderr = subprocess.PIPE, shell = True)
-        sigpout, sigperr = runsigP.communicate()
-    # Process output
-    okayLines = ['is an unknown amino amino acid', 'perl: warning:', 'LC_ALL =', 'LANG =', 'are supported and installed on your system', '# temporary directory will not be removed']
-    for line in sigperr.decode("utf-8").split('\n'):
-        # If sigperr indicates null result, create an output file we can skip later
-        if line.rstrip('\n') == '# No sequences predicted with a signal peptide':
-            with open(sigpResultFile, 'w') as fileOut:
-                fileOut.write(line)
-            break
-        # Check if this line has something present within okayLines
-        okay = 'n'
-        for entry in okayLines:
-            if entry in line or line == '':
-                okay = 'y'
-                break
-        if okay == 'y':
-            continue
-        # If nothing matches the okayLines list, we have a potentially true error
-        else:
-            raise Exception('SignalP error occurred when processing file name ' + fastaFile + '. Error text below\n' + sigperr.decode("utf-8"))
-    # Clean up tmp dir
-    if os.path.isdir(sigpTmpDir):
-        shutil.rmtree(sigpTmpDir)
-
-def tmp_file_name_gen(prefix, suffix, hashString):
+def tmp_file_name_gen(prefix, suffix, hashString, fullHashing=True):
     # Main function
-    tmpHash = hashlib.sha256(bytes(str(hashString) + str(time.time()) + str(random.randint(0, 100000)), 'utf-8') ).hexdigest()       # This should always give us something unique even if the string for hashString is the same across different runs
+    if fullHashing:
+        tmpHash = hashlib.sha256(bytes(str(hashString) + str(time.time()) + str(random.randint(0, 100000)), 'utf-8') ).hexdigest()       # This should always give us something unique even if the string for hashString is the same across different runs
+    else:
+        tmpHash = hashString
     while True:
         if os.path.isfile(prefix + tmpHash + suffix):
             tmpHash += 'X'
         else:
             return prefix + tmpHash + suffix
 
-def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen, maxProLen, signalpdir, signalporg, cygwindir):
+def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen, maxProLen, signalpExe, signalporg):
     xRegex = re.compile(r'X+')                          # Regex used to find start and stop positions of unresolved regions that are shorter than the cut-off
     prots = []
     nucs = []
@@ -347,13 +246,15 @@ def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen
                     seqIDs.append(str(x))
                     indexProts.append(acceptedPro[startIndices[x][0]:])
                 # Run signalP prediction and associate relevant results
-                tmpDir = os.path.join(signalpdir, tmp_file_name_gen("tmp_orf_find_", "", str(time.time())))
-                os.mkdir(tmpDir)
-                sigpPredictions = run_signalp_sequence(str(signalpdir), cygwindir, signalporg, tmpDir, seqIDs, indexProts)
-                os.rmdir(tmpDir)
+                sigpPredictions = run_signalp_sequence(signalpExe, signalporg, seqIDs, indexProts)
                 if sigpPredictions == {}:
                     continue
                 sigpIndices = []
+                
+                print(sigpPredictions)
+                print(startIndices)
+                print("##")
+                
                 for x in range(len(startIndices)):
                     if str(x) in sigpPredictions:
                         startIndices[x].append(sigpPredictions[str(x)][2]) # SignalP score; closest to 1 is best
@@ -389,7 +290,7 @@ def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen
                 nucs.append(nucleotide)
     return prots, nucs
 
-def record_worker(recordQ, outputQ, translationTable, unresolvedCodon, minProLen, maxProLen, signalpdir, signalporg, cygwindir):
+def record_worker(recordQ, outputQ, translationTable, unresolvedCodon, minProLen, maxProLen, signalpExe, signalporg):
     NoneType = type(None)
     while True:
         # Continue condition
@@ -403,7 +304,7 @@ def record_worker(recordQ, outputQ, translationTable, unresolvedCodon, minProLen
             recordQ.task_done()
             break
         # Perform work
-        prots, nucs = orf_find_from_record(record, translationTable, unresolvedCodon, minProLen, maxProLen, signalpdir, signalporg, cygwindir)
+        prots, nucs = orf_find_from_record(record, translationTable, unresolvedCodon, minProLen, maxProLen, signalpExe, signalporg)
         outputQ.put([record.description, prots, nucs])
         # Mark work completion
         recordQ.task_done()
@@ -463,89 +364,132 @@ def output_func(seqID, outputProts, outputNucs, outputFileName, sequenceType, pr
                 protFile.write("{0}\n{1}\n".format(seqIDs[i], outputProts[i]))
                 nuclFile.write("{0}\n{1}\n".format(seqIDs[i], outputNucs[i]))
 
-### USER INPUT
-usage = """%(prog)s reads in a fasta formatted file containing nucleotide sequences and, following user-specified parameters,
-produces an output fasta file containing potential open reading frames (ORFs) as nucleotides/protein translations/both.
-"""
-# Reqs
-p = argparse.ArgumentParser(description=usage)
-p.add_argument("-i", "-input", dest="fileName",
-           help="Input fasta file name")
-p.add_argument("-o", "-output", dest="outputFileName",
-           help="Output fasta file name")
-# Opts
-p.add_argument("-min", "--minimum", type=int, dest="minProLen",
-           help="Minimum ORF amino acid length. Default == 30.", default=30)
-p.add_argument("-max", "--maximum", type=int, dest="maxProLen",
-           help="Optional specification for maximum ORF amino acid length. Default == 0, which means there is no upper limit.", default=0)
-p.add_argument("-st", "--seqtype", dest="sequenceType", choices = ['prot', 'nucl', 'both', 'PROT', 'NUCL', 'BOTH'],
-           help="Specify the type of output you want to generate (i.e., protein translated ORF, nucleotide CDS, or both). If you specify 'both', two outputs with '_prot' and '_nucl' suffix will be generated. Default == 'prot'.", default="prot")
-p.add_argument("-f", "--force", dest="force", action="store_true", default=False,
-           help="Allow files to be overwritten at your own risk.")
-p.add_argument("-u", "--unresolved", dest="unresolvedCodon", type=int,
-           help="Default == 0, which means the program will not discover ORFs with unresolved codons. If you want to risk chimeric ORF formation, you can change this value. You MUST validate any ORFs with unresolved portions. Recommended for this value to be less than 5.", default=0)
-p.add_argument("-tr", "--translation", dest="translationTable", type=int, default=1,
-           help="Optionally specify the NCBI numeric genetic code to utilise for CDS translation (if relevant); this should be an integer from 1 to 31 (default == 1 i.e., Standard Code)")
-p.add_argument("-th", "--threads", type=int, dest="threads",
-           help="Number of threads to run. Default == 1, recommended == n-1.", default=1)
-# SignalP opts
-p.add_argument("-sdir", "--signalpdir", dest="signalpdir", type=str,
-           help="""Specify the directory where signalp executables are located.""")
-p.add_argument("-sorg", "--signalporg", dest="signalporg", type = str, choices = ['euk', 'gram-', 'gram+'], default='euk',
-           help="""Specify the type of organism for SignalP from the available
-           options. Refer to the SignalP manual if unsure what these mean (default == 'euk').""")
-p.add_argument("-c", "--cygwindir", dest="cygwindir", type=str, default="",
-           help="""Cygwin is required since you are running this program on a Windows computer.
-           Specify the location of the bin directory here or, if this is already in your PATH, you can leave this blank."""
-           if platform.system() == 'Windows' else argparse.SUPPRESS)
+def main():
 
-args = p.parse_args()
-args = validate_args(args)
+    ### USER INPUT
+    usage = """%(prog)s reads in a fasta formatted file containing nucleotide sequences and, following user-specified parameters,
+    produces an output fasta file containing potential open reading frames (ORFs) as nucleotides/protein translations/both.
+    """
+    # Reqs
+    p = argparse.ArgumentParser(description=usage)
+    p.add_argument("-i", dest="fileName",
+                required=True,
+                help="Input fasta file name")
+    p.add_argument("-o", dest="outputFileName",
+                required=True,
+                help="Output fasta file name")
+    p.add_argument("-s", dest="signalpExe",
+                required=True,
+                type=str,
+                help="Specify the location of the signalp executable.")
+    # Opts
+    p.add_argument("-min", "--minimum", dest="minProLen",
+                required=False,
+                type=int,
+                help="Minimum ORF amino acid length. Default == 30.",
+                default=30)
+    p.add_argument("-max", "--maximum", dest="maxProLen",
+                required=False,
+                type=int,
+                help="""Optional specification for maximum ORF amino acid length. Default == 0,
+                which means there is no upper limit.""",
+                default=0)
+    p.add_argument("-st", "--seqtype", dest="sequenceType",
+                required=False,
+                choices = ['prot', 'nucl', 'both', 'PROT', 'NUCL', 'BOTH'],
+                help="""Specify the type of output you want to generate (i.e., protein translated ORF,
+                nucleotide CDS, or both). If you specify 'both', two outputs with '_prot' and '_nucl'
+                suffix will be generated. Default == 'prot'.""",
+                default="prot")
+    p.add_argument("-f", "--force", dest="force",
+                required=False,
+                action="store_true",
+                help="Allow files to be overwritten at your own risk.",
+                default=False)
+    p.add_argument("-u", "--unresolved", dest="unresolvedCodon",
+                required=False,
+                type=int,
+                help="""Default == 0, which means the program will not discover ORFs with unresolved codons.
+                If you want to risk chimeric ORF formation, you can change this value. You MUST validate any
+                ORFs with unresolved portions. Recommended for this value to be less than 5.""",
+                default=0)
+    p.add_argument("-tr", "--translation", dest="translationTable",
+                required=False,
+                type=int,
+                help="""Optionally specify the NCBI numeric genetic code to utilise for CDS translation (if relevant);
+                this should be an integer from 1 to 31 (default == 1 i.e., Standard Code)""",
+                default=1)
+    p.add_argument("-th", "--threads", dest="threads",
+                required=False,
+                type=int, 
+                help="Number of threads to run. Default == 1, recommended == n-1.",
+                default=1)
+    # SignalP opts
+    p.add_argument("-sorg", "--signalporg", dest="signalporg",
+                required=False,
+                type=str,
+                choices=['euk', 'gram-', 'gram+'],
+                help="""Specify the type of organism for SignalP from the available
+                options. Refer to the SignalP manual if unsure what these mean (default == 'euk').""",
+                default='euk')
 
-### RATIONALE FOR UNRESOLVED REGIONS ###
-# I had to decide how to handle unresolved regions. I believe there are two valid approaches to this. The first is to replace any unresolved regions with stop codons and let the rest of the script process it like normal.
-# This appears to be what NCBI does for their ORF Finder. The benefits of this approach is that you can't accidentally form chimeras. However, I think there is a second approach that has merit. If you are working with a genome that has
-# short and rare occurrences of unresolved regions, you might not want to split up large ORFs on the basis of them having a very short stretch of unresolved codons. In this case, we can choose to not replace unresolved regions with stop codons
-# if the region is shorter than an arbitrary and small limit. This isn't exactly perfect since even very short unresolved regions might hide stop codons. Thus, this option should be OFF by default, but we can provide the users an
-# on/off switch so they can decide whether they want to risk discovering chimeric ORFs - providing a text prompt if the option is switched ON to verify any ORFs with unresolved regions would wash my hands of any mistake.
+    args = p.parse_args()
+    args = validate_args(args)
 
-if args.unresolvedCodon != 0:
-    print('Program has noted that you are allowing the discovery of ORFs with unresolved codon regions. This is risky behaviour, since this program cannot guarantee that an unresolved region does not contain a stop codon. Subsequently, you can have chimeras form from two separate ORFs. YOU MUST VERIFY ANY ORFS WITH UNRESOLVED REGIONS! The best way to do this is with BLAST against homologous proteins. You have been warned.')
+    ### RATIONALE FOR UNRESOLVED REGIONS ###
+    # I had to decide how to handle unresolved regions. I believe there are two valid approaches to this. The first is to replace any unresolved regions with stop codons and let the rest of the script process it like normal.
+    # This appears to be what NCBI does for their ORF Finder. The benefits of this approach is that you can't accidentally form chimeras. However, I think there is a second approach that has merit. If you are working with a genome that has
+    # short and rare occurrences of unresolved regions, you might not want to split up large ORFs on the basis of them having a very short stretch of unresolved codons. In this case, we can choose to not replace unresolved regions with stop codons
+    # if the region is shorter than an arbitrary and small limit. This isn't exactly perfect since even very short unresolved regions might hide stop codons. Thus, this option should be OFF by default, but we can provide the users an
+    # on/off switch so they can decide whether they want to risk discovering chimeric ORFs - providing a text prompt if the option is switched ON to verify any ORFs with unresolved regions would wash my hands of any mistake.
 
-# Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
-records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
-totalCount = 0
-for record in records:
-    totalCount += 1
-records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
+    if args.unresolvedCodon != 0:
+        print('Program has noted that you are allowing the discovery of ORFs with unresolved codon regions. This is risky behaviour, since this program cannot guarantee that an unresolved region does not contain a stop codon. Subsequently, you can have chimeras form from two separate ORFs. YOU MUST VERIFY ANY ORFS WITH UNRESOLVED REGIONS! The best way to do this is with BLAST against homologous proteins. You have been warned.')
 
-### CORE PROCESSING LOOP
+    # Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
+    records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
+    totalCount = 0
+    for record in records:
+        totalCount += 1
+    records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
 
-# Set up queues
-recordQ = queue.Queue(maxsize=50) # Arbitrary size; attempt to limit memory usage
-outputQ = queue.Queue(maxsize=10000) # Arbitary size; attempt to limit memory usage
+    ### CORE PROCESSING LOOP
 
-# Start threads
-for i in range(args.threads):
-    worker = Thread(target= record_worker, args=(recordQ, outputQ, args.translationTable, args.unresolvedCodon, args.minProLen, args.maxProLen, args.signalpdir, args.signalporg, args.cygwindir))
-    worker.setDaemon(True)
-    worker.start()
-outputWorker = Thread(target = output_worker, args=(outputQ, totalCount, args.outputFileName, args.sequenceType, args.protOutName, args.nuclOutName))
-outputWorker.setDaemon(True)
-outputWorker.start()
+    # Set up queues
+    recordQ = queue.Queue(maxsize=50) # Arbitrary size; attempt to limit memory usage
+    outputQ = queue.Queue(maxsize=10000) # Arbitary size; attempt to limit memory usage
 
-# Put record in queue for worker threads
-print('Starting the core processing of this script now. Progress bar will display below in a moment.')
-for record in records:
-    recordQ.put(record)
-records.close()
+    # Start threads
+    for i in range(args.threads):
+        worker = Thread(target=record_worker,
+                        args=(recordQ, outputQ, args.translationTable,
+                            args.unresolvedCodon, args.minProLen, args.maxProLen,
+                            args.signalpExe, args.signalporg))
+        worker.setDaemon(True)
+        worker.start()
 
-# Close up shop on the threading structures
-for i in range(args.threads):
-    recordQ.put(None) # Add marker for record_workers to end
-recordQ.join()
-outputQ.put(None) # Add marker for output_worker to end
-outputQ.join()
+    outputWorker = Thread(target=output_worker,
+                        args=(outputQ, totalCount, args.outputFileName,
+                                args.sequenceType, args.protOutName, args.nuclOutName))
+    outputWorker.setDaemon(True)
+    outputWorker.start()
 
-#### SCRIPT ALL DONE
-print('Program completed successfully!')
+    # Put records in queue for worker threads
+    print('Starting the core processing of this script now. Progress bar will display below in a moment.')
+    for record in records:
+        recordQ.put(record)
+
+    # Close up shop on the threading structures
+    for i in range(args.threads):
+        recordQ.put(None) # Add marker for record_workers to end
+    recordQ.join()
+
+    outputQ.put(None) # Add marker for output_worker to end
+    outputQ.join()
+
+    #### SCRIPT ALL DONE
+    print('Program completed successfully!')
+    records.close()
+
+if __name__ == "__main__":
+    main()
