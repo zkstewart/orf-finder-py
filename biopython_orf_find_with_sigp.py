@@ -132,6 +132,9 @@ def tmp_file_name_gen(prefix, suffix, hashString, fullHashing=True):
 
 def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen, maxProLen, signalpExe, signalporg):
     xRegex = re.compile(r'X+')                          # Regex used to find start and stop positions of unresolved regions that are shorter than the cut-off
+    
+    # Grab all "good" start sites for checking with signalP
+    indices = []
     prots = []
     nucs = []
     for strand, nuc in [(+1, record.seq), (-1, record.seq.reverse_complement())]:
@@ -140,6 +143,7 @@ def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen
             length = 3 * ((len(record)-frame) // 3)
             frameNuc = str(nuc[frame:frame+length])
             frameProt = str(nuc[frame:frame+length].translate(table=translationTable))
+            
             # Split protein/nucleotide into corresponding ORFs
             ongoingLength = 0                       # The ongoingLength will track where we are along the unresolvedProt sequence for getting the nucleotide sequence
             splitNucleotide = []
@@ -178,23 +182,27 @@ def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen
                         resolvedNuc.append(splitNucleotide[i][start*3:end*3])
                     resolvedProt.append(splitProtein[i][posProt[-1]:])          # We can now grab everything after our last unresolved region. If there was only one unresolved region, we never enter the above loop and just use the coordinate pair to get our start and end sequences
                     resolvedNuc.append(splitNucleotide[i][posProt[-1]*3:])
+            
             # Delete old entries and add resolved entries
             for index in indicesForDel:
                 del splitProtein[index]
                 del splitNucleotide[index]
             splitProtein += resolvedProt                            # If we don't find any unresolved regions we wanted to delete, resolvedProt will be empty so nothing happens
             splitNucleotide += resolvedNuc
-
+            
             # Enter the main processing loop with our resolved regions
-            for i in range(len(splitProtein)):                              # Note that I have done a 'for i in range...' loop rather than a 'for value in splitProtein' loop which would have been simpler for a reason explained below on the 'elif i + 1 ==' line
+            for i in range(len(splitProtein)):
+                
                 # Declare blank values needed for each potential ORF region so we can tell which things were 'found'
                 noneCodonContingency = None
+                
                 # Process sequences to determine whether we're ignoring this, or adding an asterisk for length counts
                 if len(splitProtein[i]) < minProLen:            # Disregard sequences that won't meet the size requirement without further processing
                     continue
                 elif maxProLen != 0 and len(splitProtein[i]) > maxProLen:
                     continue
                 acceptedPro = str(splitProtein[i])
+                
                 # Obtain possible start sites
                 ## Canonical start coding
                 ALLOWED_SHORT_RATIO = 0.50 # Arbitrary; we want to prevent a sequence from being shortened excessively
@@ -205,6 +213,7 @@ def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen
                 for x in range(0, len(acceptedPro)):
                     if acceptedPro[x].lower() == "m" and x <= allowedShortenLen:
                         startIndices.append([x, 0]) # 0 is the "best" and represents a canonical start
+                
                 ## Alternative start coding
                 nucSeqOfProt = splitNucleotide[i]               # Don't need to do it, but old version of script extensively uses this value and cbf changing it
                 codons = re.findall('..?.?', nucSeqOfProt)          # Pulls out a list of codons from the nucleotide
@@ -219,12 +228,15 @@ def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen
                                 startIndices.append([x, 2])
                                 noneCodonContingency = True # Stop accepting CTGs after the first to prevent "contamination"
                 startIndices.sort(key = lambda x: x[0])
+                
                 # Skip if no hits are obtained
                 if startIndices == []:
                     continue
+                
                 # Skip the hit if it doesn't meet our minimum length requirement anymore
                 if len(acceptedPro[startIndices[0][0]:]) < minProLen: # Culling is necessary since we will have shortened the sequence somewhat unless we accepted the topHit as being a no codon start ORF. Note that we will here consider a stop codon in the length of the protein, such that a protein with 99AAs and a stop will pass a minimum 100AA length test. I think this is fair since not all regions here have a stop codon which allows weight to be added to these cases, especially since a stop codon is still conserved as part of an ORF.
                     continue
+                
                 # Cull individual start sites that don't meet our minimum length requirement
                 exitLoop = False
                 while True:
@@ -236,55 +248,60 @@ def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen
                             del startIndices[x]
                             exitLoop = False
                             break
+                
                 # Skip if we've culled all our hits
                 if startIndices == []:
                     continue
-                # Assess remaining start sites for signal peptide presence
-                seqIDs = []
-                indexProts = []
-                for x in range(len(startIndices)):
-                    seqIDs.append(str(x))
-                    indexProts.append(acceptedPro[startIndices[x][0]:])
-                # Run signalP prediction and associate relevant results
-                sigpPredictions = run_signalp_sequence(signalpExe, signalporg, seqIDs, indexProts)
-                if sigpPredictions == {}:
-                    continue
-                sigpIndices = []
                 
+                # Store start sites for batched signal peptide presence prediction
                 for x in range(len(startIndices)):
-                    if str(x) in sigpPredictions:
-                        startIndices[x].append(sigpPredictions[str(x)][2]) # SignalP score; closest to 1 is best
-                        sigpIndices.append(startIndices[x])
-                # If no signal peptides were found, skip sequence
-                if sigpIndices == []:
-                    continue
-                # Sort candidates on the basis of evidence signalP > canonical > startSite
-                sigpIndices.sort(key = lambda x: (x[1], x[0])) # i.e., [canonical(0 is best), startSite(smaller is better)]
-                # Identify the best candidate with a signalP prediction
-                bestCandidate = sigpIndices[0]
-                EXTENSION_FOR_BETTER_SIGP_SCORE = 7 # Arbitrary; this should help to address situations where two M's are close together, and one has a better signalP prediction score
-                STEPPING_STONE_EXTENSION_LIMITER = 3 # Arbitrary; after extending for a better sigp score once, we enforce a stricter mechanism for extensions afterwards
-                for sigpIndex in sigpIndices: ## TBD: Include extension
-                    # If new candidate has a better start site than bestCandidate...
-                    if sigpIndex[1] < bestCandidate[1]: # this measures canonical (0 is best)
-                        bestCandidate = sigpIndex
-                    # If new candidate has an equivalent start site...
-                    elif sigpIndex[1] == bestCandidate[1]:
-                        # ...and it is much longer than bestCandidate...
-                        if sigpIndex[0] + EXTENSION_FOR_BETTER_SIGP_SCORE < bestCandidate[0]:
-                            bestCandidate = sigpIndex
-                        # ...and it isn't much shorter than bestCandidate...
-                        elif sigpIndex[0] - EXTENSION_FOR_BETTER_SIGP_SCORE <= bestCandidate[0]:
-                            # ...and its signalP score is better than bestCandidate...
-                            if sigpIndex[2] > bestCandidate[2]: # this measures signalpep (1 is best)
-                                bestCandidate = sigpIndex
-                                EXTENSION_FOR_BETTER_SIGP_SCORE = STEPPING_STONE_EXTENSION_LIMITER # Enforce stricter limit now that we've extended once
-                # Extract the relevant protein and nucleotide to add to our output list
-                protein = acceptedPro[bestCandidate[0]:]
-                nucleotide = nucSeqOfProt[bestCandidate[0]*3:]
-                prots.append(protein)
-                nucs.append(nucleotide)
-    return prots, nucs
+                    indices.append(startIndices[x])
+                    prots.append(acceptedPro[startIndices[x][0]:])
+                    nucs.append(nucSeqOfProt[startIndices[x][0]*3:])
+    
+    # Run signalP prediction
+    ids = [ str(i) for i in range(len(prots)) ]
+    sigpPredictions = run_signalp_sequence(signalpExe, signalporg, ids, prots)
+    if sigpPredictions == {}:
+        return None, None
+    
+    # Reduce our indices, prots, and nucs lists to just those with hits
+    indices = [ indices[int(id)] for id in sigpPredictions ]
+    prots = [ prots[int(id)] for id in sigpPredictions ]
+    nucs = [ nucs[int(id)] for id in sigpPredictions ]
+    scores = [ sigpPredictions[id][2] for id in sigpPredictions  ] # also get the sigp prediction score
+    
+    # Immediately return value if there's only one hit
+    if len(prots) == 1:
+        return prots, nucs
+    
+    # Combine our index, prot, nuc, and score values
+    indexProtNucs = list(zip(indices, prots, nucs, scores))
+    
+    # Sort candidates on the basis of evidence canonical > startSite > sigp score
+    indexProtNucs.sort(key = lambda x: (x[0][1], -len(x[1]), -x[3])) # i.e., [canonical(0 is best), sequence length(longer is better), score (higher is better)]
+    
+    # Identify the best candidate with a signalP prediction
+    bestCandidate = indexProtNucs[0]
+    EXTENSION_FOR_BETTER_SIGP_SCORE = 7 # Arbitrary; this should help to address situations where two M's are close together, and one has a better signalP prediction score
+    STEPPING_STONE_EXTENSION_LIMITER = 3 # Arbitrary; after extending for a better sigp score once, we enforce a stricter mechanism for extensions afterwards
+    for indexPN in indexProtNucs: ## TBD: Include extension
+        # If new candidate has a better start site than bestCandidate...
+        if indexPN[0][1] < bestCandidate[0][1]: # this measures canonical (0 is best)
+            bestCandidate = indexPN
+        # If new candidate has an equivalent start site...
+        elif indexPN[0][1] == bestCandidate[0][1]:
+            # ...and it is much longer than bestCandidate...
+            if (len(bestCandidate[1]) + EXTENSION_FOR_BETTER_SIGP_SCORE) < len(indexPN[1]):
+                bestCandidate = indexPN
+            # ...or it isn't much shorter than bestCandidate...
+            elif (len(bestCandidate[1]) - EXTENSION_FOR_BETTER_SIGP_SCORE) <= len(indexPN[1]):
+                # ...and its signalP score is better than bestCandidate...
+                if indexPN[3] > bestCandidate[3]: # this measures signalpep (1 is best)
+                    bestCandidate = indexPN
+                    EXTENSION_FOR_BETTER_SIGP_SCORE = STEPPING_STONE_EXTENSION_LIMITER # Enforce stricter limit now that we've extended once
+    
+    return [bestCandidate[1]], [bestCandidate[2]] # function is expected to return a list
 
 def record_worker(recordQ, outputQ, translationTable, unresolvedCodon, minProLen, maxProLen, signalpExe, signalporg):
     NoneType = type(None)
@@ -301,7 +318,8 @@ def record_worker(recordQ, outputQ, translationTable, unresolvedCodon, minProLen
             break
         # Perform work
         prots, nucs = orf_find_from_record(record, translationTable, unresolvedCodon, minProLen, maxProLen, signalpExe, signalporg)
-        outputQ.put([record.description, prots, nucs])
+        if prots != None:
+            outputQ.put([record.description, prots, nucs])
         # Mark work completion
         recordQ.task_done()
 
