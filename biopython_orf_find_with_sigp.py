@@ -432,33 +432,32 @@ def main():
                 help="""Specify the type of organism for SignalP from the available
                 options. Refer to the SignalP manual if unsure what these mean (default == 'euk').""",
                 default='euk')
-
+    
     args = p.parse_args()
     args = validate_args(args)
-
+    
     ### RATIONALE FOR UNRESOLVED REGIONS ###
     # I had to decide how to handle unresolved regions. I believe there are two valid approaches to this. The first is to replace any unresolved regions with stop codons and let the rest of the script process it like normal.
     # This appears to be what NCBI does for their ORF Finder. The benefits of this approach is that you can't accidentally form chimeras. However, I think there is a second approach that has merit. If you are working with a genome that has
     # short and rare occurrences of unresolved regions, you might not want to split up large ORFs on the basis of them having a very short stretch of unresolved codons. In this case, we can choose to not replace unresolved regions with stop codons
     # if the region is shorter than an arbitrary and small limit. This isn't exactly perfect since even very short unresolved regions might hide stop codons. Thus, this option should be OFF by default, but we can provide the users an
     # on/off switch so they can decide whether they want to risk discovering chimeric ORFs - providing a text prompt if the option is switched ON to verify any ORFs with unresolved regions would wash my hands of any mistake.
-
+    
     if args.unresolvedCodon != 0:
         print('Program has noted that you are allowing the discovery of ORFs with unresolved codon regions. This is risky behaviour, since this program cannot guarantee that an unresolved region does not contain a stop codon. Subsequently, you can have chimeras form from two separate ORFs. YOU MUST VERIFY ANY ORFS WITH UNRESOLVED REGIONS! The best way to do this is with BLAST against homologous proteins. You have been warned.')
-
+    
     # Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
-    records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
-    totalCount = 0
-    for record in records:
-        totalCount += 1
-    records = SeqIO.parse(open(args.fileName, 'r'), 'fasta')
-
+    with open(args.fileName, 'r') as fileIn:
+        records = SeqIO.parse(fileIn, 'fasta')
+        totalCount = 0
+        for record in records:
+            totalCount += 1
+    
     ### CORE PROCESSING LOOP
-
     # Set up queues
     recordQ = queue.Queue(maxsize=50) # Arbitrary size; attempt to limit memory usage
     outputQ = queue.Queue(maxsize=10000) # Arbitary size; attempt to limit memory usage
-
+    
     # Start threads
     for i in range(args.threads):
         worker = Thread(target=record_worker,
@@ -467,29 +466,30 @@ def main():
                             args.signalpExe, args.signalporg))
         worker.setDaemon(True)
         worker.start()
-
+    
     outputWorker = Thread(target=output_worker,
                         args=(outputQ, totalCount, args.outputFileName,
                                 args.sequenceType, args.protOutName, args.nuclOutName))
     outputWorker.setDaemon(True)
     outputWorker.start()
-
+    
     # Put records in queue for worker threads
-    print('Starting the core processing of this script now. Progress bar will display below in a moment.')
-    for record in records:
-        recordQ.put(record)
-
+    with open(args.fileName, 'r') as fileIn:
+        records = SeqIO.parse(fileIn, 'fasta')
+        print('Starting the core processing of this script now. Progress bar will display below in a moment.')
+        for record in records:
+            recordQ.put(record)
+    
     # Close up shop on the threading structures
     for i in range(args.threads):
         recordQ.put(None) # Add marker for record_workers to end
     recordQ.join()
-
+    
     outputQ.put(None) # Add marker for output_worker to end
     outputQ.join()
-
+    
     #### SCRIPT ALL DONE
     print('Program completed successfully!')
-    records.close()
 
 if __name__ == "__main__":
     main()
