@@ -251,10 +251,6 @@ def orf_find_from_record(record, translationTable, unresolvedCodonLen, minProLen
                     continue
                 sigpIndices = []
                 
-                print(sigpPredictions)
-                print(startIndices)
-                print("##")
-                
                 for x in range(len(startIndices)):
                     if str(x) in sigpPredictions:
                         startIndices[x].append(sigpPredictions[str(x)][2]) # SignalP score; closest to 1 is best
@@ -446,7 +442,7 @@ def main():
     if args.unresolvedCodon != 0:
         print('Program has noted that you are allowing the discovery of ORFs with unresolved codon regions. This is risky behaviour, since this program cannot guarantee that an unresolved region does not contain a stop codon. Subsequently, you can have chimeras form from two separate ORFs. YOU MUST VERIFY ANY ORFS WITH UNRESOLVED REGIONS! The best way to do this is with BLAST against homologous proteins. You have been warned.')
     
-    # Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
+    # Load the fasta file as a generator object, get the total number of sequences in the file, and validate that they're nucleotides
     with open(args.fileName, 'r') as fileIn:
         records = SeqIO.parse(fileIn, 'fasta')
         totalCount = 0
