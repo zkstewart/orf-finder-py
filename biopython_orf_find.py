@@ -330,11 +330,11 @@ elif translationTable > 31:
         quit()
 
 # Load the fasta file as a generator object, get the total number of sequences in the file, then re-load it for the upcoming loop
-records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
+records = SeqIO.parse(open(fileName, 'r'), 'fasta')
 totalCount = 0
 for record in records:
         totalCount += 1
-records = SeqIO.parse(open(fileName, 'rU'), 'fasta')
+records = SeqIO.parse(open(fileName, 'r'), 'fasta')
 
 ### CORE PROCESSING LOOP
 print('Starting the core processing of this script now. Progress bar is displayed below. Every 10,000 sequences, current progress will be saved to the output file(s) to reduce memory footprint.')
@@ -580,7 +580,10 @@ for record in records:
 
 # Dump the last few results after the script has finished, or create the output if there were less than 10,000 sequences
 outputProt, outputNucl = output_func(outputProt, outputNucl, ongoingCount, outputFileName, sequenceType, 'final')
-records.close()
+try:
+    records.close()
+except:
+    pass # if this errors, then SeqIO is handling the open/close state of the file
 
 #### SCRIPT ALL DONE
 print('Program completed successfully!')
